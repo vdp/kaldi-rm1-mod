@@ -15,7 +15,7 @@
 # See the Apache 2 License for the specific language governing permissions and
 # limitations under the License.
 
-exit 1 # Don't run this... it's to be run line by line from the shell.
+#exit 1 # Don't run this... it's to be run line by line from the shell.
 
 # This script file cannot be run as-is; some paths in it need to be changed
 # before you can run it.
@@ -35,8 +35,12 @@ exit 1 # Don't run this... it's to be run line by line from the shell.
 # RM is a directory with subdirectories rm1_audio1, rm1_audio2, rm2_audio
 cd data_prep
 #*** You have to change the pathname below.***
-./run.sh /path/to/RM
+RM1_ROOT=/home/vassil/devel/speech/datasets/rm1
+./run.sh $RM1_ROOT
 cd ..
+
+echo 'Main run.sh: End marker reached'
+exit 0
 
 mkdir -p data
 ( cd data; cp ../data_prep/{train,test*}.{spk2utt,utt2spk} . ; cp ../data_prep/spk2gender.map . )

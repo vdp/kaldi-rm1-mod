@@ -50,7 +50,7 @@ open(O, ">$out_txt") || die "Open output transcription file $out_txt";
 open(P, ">$out_scp") || die "Open output scp file $out_scp";
 
 while(<G>) {
-    $_ =~ m:/(\w+)/(\w+)\.sph\s+$:i || die "bad scp line $_";
+    $_ =~ m:/(\w+)/(\w+)\s+$:i || die "bad scp line $_";
     $spkname = $1;
     $uttname = $2;
     $uttname  =~ tr/a-z/A-Z/;

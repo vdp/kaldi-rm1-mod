@@ -29,7 +29,7 @@ unless (open(IN_FILE, "@ARGV[0]")) {
 while ($line = <IN_FILE>)
 {	
 	chop($line);
-	if (($line =~ /^[a-z]/)) 
+	if (($line =~ /^[A-Z]/)) 
 	{
 		$line =~ s/\+1//g;
 		@LineArray = split(/\s+/,$line);
