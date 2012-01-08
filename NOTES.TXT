@@ -1,0 +1,14 @@
+Word pair -> Grammar(G) WFST conversion (scripts/make_rm_lm.pl)
+---------------------------------------------------------------
+
+The probability mass is distributed equally among all successor words in a pair.
+The weights are in negative natural logarithms of the probability. For example
+if there are N successor words for word X, the state in the WFST that represents
+X(lets call this Sx) will have N output arcs with input and output labels equal
+to the successor word and weight -log(1/N).
+The start state has ID of 0 and has arcs to all words that can legitimately start
+a sentence. According to the rules described in 'wp_gram.txt' these are signified
+by making them successors of the special 'SENTENCE-END' token.
+The words that can be placed last in a sentence(have 'SENTENCE-END' as a successor)
+have arcs with epsilon input/output labels(and weight as normal) to the unique end 
+state.
