@@ -3,9 +3,9 @@
 ;
 ; Our 'corpus' has just three sentences:
 ;
-; ABERDEEN ABOVE ABOARD
-; ABOVE ABERDEEN ABOARD
-; ABOVE ABOARD ABERDEEN
+; FIVE SHIP KNOT
+; NOT SHIP KNOT
+; NOT FIVE KNOT
 ;
 ; The resulting grammar WFST can be produced by:
 ; scripts/make_rm_lm.pl data_prep/wp_toy.txt
@@ -13,16 +13,16 @@
 ; For visualization:
 ; scripts/make_rm_lm.pl data_prep/wp_toy.txt | fstcompile --isymbols=data_prep/isyms_toy.txt --osymbols=data_prep/osyms_toy.txt | fstdraw --isymbols=data_prep/isyms_toy.txt  --osymbols=data_prep/osyms_toy.txt --portrait=false | dot -Tpdf > g_toy.pdf
 
->ABERDEEN
- ABOVE
- ABOARD
- SENTENCE-END
->ABOVE
- ABERDEEN
- ABOARD
->ABOARD
- ABERDEEN
- SENTENCE-END
 >SENTENCE-END
- ABERDEEN
- ABOVE
+ FIVE
+ NOT
+>FIVE
+ SHIP
+ KNOT
+>KNOT
+ SENTENCE-END
+>NOT
+ SHIP
+ FIVE
+>SHIP
+ KNOT

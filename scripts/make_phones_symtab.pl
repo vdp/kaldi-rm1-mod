@@ -19,8 +19,10 @@
 
 while(<>) {
     @A = split(" ", $_);
-    for ($i=2; $i<@A; $i++) {
-        $P{$A[$i]} = 1; # seen it.
+    for ($i=1; $i<@A; $i++) {
+	if ($A[$i] ne 'sil') {
+	    $P{$A[$i]} = 1; # seen it.
+	}
     }
 }
 
