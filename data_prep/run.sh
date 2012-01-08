@@ -116,7 +116,6 @@ cat test.utt2spk | sort -k 2 | ../scripts/utt2spk_to_spk2utt.pl > test.spk2utt
 ../scripts/make_rm_lm.pl $RMROOT/LDC93S3B/disc_1/doc/wp_gram.txt  > G.txt 
 
 # Getting lexicon
-ls -al $RMROOT/conf/pcdsril.txt
 ../scripts/make_rm_dict.pl  $RMROOT/conf/pcdsril.txt > lexicon.txt
 
 echo Succeeded.

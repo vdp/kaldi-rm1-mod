@@ -26,7 +26,6 @@ cp data_prep/G.txt data/
 scripts/make_words_symtab.pl < data/G.txt > data/words.txt
 cp data_prep/lexicon.txt data/
 
-
 scripts/make_phones_symtab.pl < data/lexicon.txt > data/phones.txt
 
 silphones="sil"; # This would in general be a space-separated list of all silence phones.  E.g. "sil vn"
@@ -40,7 +39,6 @@ scripts/add_disambig.pl data/phones.txt $ndisambig > data/phones_disambig.txt
 # Create train transcripts in integer format:
 cat data_prep/train_trans.txt | \
   scripts/sym2int.pl --ignore-first-field data/words.txt  > data/train.tra
-
 
 # Get lexicon in FST format.
 

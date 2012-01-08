@@ -39,14 +39,17 @@ RM1_ROOT=/home/vassil/devel/speech/datasets/rm1
 ./run.sh $RM1_ROOT
 cd ..
 
-echo 'Main run.sh: End marker reached'
-exit 0
-
 mkdir -p data
-( cd data; cp ../data_prep/{train,test*}.{spk2utt,utt2spk} . ; cp ../data_prep/spk2gender.map . )
+# orig
+#( cd data; cp ../data_prep/{train,test*}.{spk2utt,utt2spk} . ; cp ../data_prep/spk2gender.map . )
+# /orig
+( cd data; cp ../data_prep/{train,test}.{spk2utt,utt2spk} . )
 
 # This next step converts the lexicon, grammar, etc., into FST format.
 steps/prepare_graphs.sh
+
+echo 'Main run.sh: End marker reached'
+exit 0
 
 # Next, make sure that "exp/" is someplace you can write a significant amount of
 # data to (e.g. make it a link to a file on some reasonably large file system).
