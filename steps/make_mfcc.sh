@@ -28,4 +28,5 @@ out=$1
 mkdir -p $out
 
 pack-sphinx-feats scp:$scpin ark,scp:$out/$2.ark,$out/$2.scp
+cp $out/$2.scp data/$2.scp
 

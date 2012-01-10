@@ -26,21 +26,17 @@ graphdir=exp/graph_mono
 
 scripts/mkgraph.sh --mono $tree $model $graphdir
 
-for test in mar87 oct87 feb89 oct89 feb91 sep92; do
- (
-  feats="ark:add-deltas --print-args=false scp:data/test_${test}.scp ark:- |"
+feats="ark:add-deltas --print-args=false scp:data/test.scp ark:- |"
 
-  gmm-decode-faster --beam=20.0 --acoustic-scale=0.08333 --word-symbol-table=data/words.txt $model $graphdir/HCLG.fst "$feats" ark,t:$dir/test_${test}.tra ark,t:$dir/test_${test}.ali  2> $dir/decode_${test}.log
+gmm-decode-faster --beam=20.0 --acoustic-scale=0.08333 --word-symbol-table=data/words.txt $model $graphdir/HCLG.fst "$feats" ark,t:$dir/test.tra ark,t:$dir/test.ali  2> $dir/decode.log
 
- # the ,p option lets it score partial output without dying..
-  scripts/sym2int.pl --ignore-first-field data/words.txt data_prep/test_${test}_trans.txt | \
-  compute-wer --mode=present ark:-  ark,p:$dir/test_${test}.tra >& $dir/wer_${test}
- ) &
-done
+# the ,p option lets it score partial output without dying..
+scripts/sym2int.pl --ignore-first-field data/words.txt data_prep/test_trans.txt | \
+compute-wer --mode=present ark:-  ark,p:$dir/test.tra >& $dir/wer_test
 
 wait
 
-grep WER $dir/wer_* | \
+grep WER $dir/wer_test | \
   awk '{n=n+$4; d=d+$6} END{ printf("Average WER is %f (%d / %d) \n", (100.0*n)/d, n, d); }' \
    > $dir/wer
 

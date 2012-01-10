@@ -60,11 +60,12 @@ mfccdir=./mfcc
 steps/make_mfcc.sh $mfccdir train
 steps/make_mfcc.sh $mfccdir test
 
+steps/train_mono.sh
+steps/decode_mono.sh
+
 echo 'Main run.sh: End marker reached'
 exit 0
 
-steps/train_mono.sh
-steps/decode_mono.sh  &
 steps/train_tri1.sh
 (steps/decode_tri1.sh; steps/decode_tri1_fmllr.sh; steps/decode_tri1_regtree_fmllr.sh ;steps/decode_tri1_latgen.sh; steps/decode_tri1_latoracle.sh) &
 
