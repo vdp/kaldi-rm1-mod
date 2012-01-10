@@ -47,11 +47,11 @@ fi
 #) | perl -ane ' m:/sa\d.sph:i || m:/sb\d\d.sph:i || print; '  > train_sph.flist
 #/orig
 
-# Make a list of files (w/o .mfc suffix)
+# Make a list of files
 cat $RMROOT/rm1_feats/etc/rm1_train.fileids | \
-    xargs -I_ echo $RMROOT/rm1_feats/feat/_ > train.flist
+    xargs -I_x_ echo $RMROOT/rm1_feats/feat/_x_.mfc > train.flist
 cat $RMROOT/rm1_feats/etc/rm1_test.fileids | \
-    xargs -I_ echo $RMROOT/rm1_feats/feat/_ > test.flist
+    xargs -I_x_ echo $RMROOT/rm1_feats/feat/_x_.mfc > test.flist
 
 # make_trans.pl also creates the utterance id's and the kaldi-format scp file.
 

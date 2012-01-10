@@ -48,9 +48,6 @@ mkdir -p data
 # This next step converts the lexicon, grammar, etc., into FST format.
 steps/prepare_graphs.sh
 
-echo 'Main run.sh: End marker reached'
-exit 0
-
 # Next, make sure that "exp/" is someplace you can write a significant amount of
 # data to (e.g. make it a link to a file on some reasonably large file system).
 # If it doesn't exist, the scripts below will make the directory "exp".
@@ -59,9 +56,12 @@ exit 0
 # where you have space.  Make sure you create the directory.
 #e.g.: mfccdir=/mnt/matylda6/jhu09/qpovey/kaldi_rm_mfccb
 # Note: mfccdir should be an absolute pathname
-mfccdir=/path/to/mfccdir
-steps/make_mfcc_train.sh $mfccdir
-steps/make_mfcc_test.sh $mfccdir
+mfccdir=./mfcc
+steps/make_mfcc.sh $mfccdir train
+steps/make_mfcc.sh $mfccdir test
+
+echo 'Main run.sh: End marker reached'
+exit 0
 
 steps/train_mono.sh
 steps/decode_mono.sh  &
