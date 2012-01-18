@@ -18,6 +18,8 @@
 # The output of this script is the symbol tables data/{words.txt,phones.txt},
 # and the grammars and lexicons data/{L,G}{,_disambig}.fst
 
+echo "--- Starting graph preparation ..."
+
 # To be run from ..
 if [ -f path.sh ]; then . path.sh; fi
 
@@ -65,3 +67,4 @@ fsttablecompose data/L.fst data/G.fst | fstisstochastic || echo Error
 ## just have a look and make sure it seems sane.
 fstprint   --isymbols=data/phones.txt --osymbols=data/words.txt data/L.fst  | head
 
+echo "--- Done graph preparation!"

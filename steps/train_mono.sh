@@ -18,6 +18,8 @@
 # To be run from ..
 if [ -f path.sh ]; then . path.sh; fi
 
+echo "--- Starting monophone training  ..."
+
 # Train the monophone on a subset-- no point using all the data.
 dir=exp/mono
 n=1000
@@ -86,6 +88,8 @@ while [ $x -lt $numiters ]; do
 done
 
 ( cd $dir; rm final.mdl 2>/dev/null; ln -s $x.mdl final.mdl )
+
+echo "--- Monophone training DONE!"
 
 # example of showing the alignments:
 # show-alignments data/phones.txt $dir/30.mdl ark:$dir/cur.ali | head -4

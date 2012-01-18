@@ -20,6 +20,8 @@
 # This (train_tri2a) is a basic triphone training starting from tri1/,
 # to serve as a baseline for the other train_tri2? scripts.
 
+echo "--- Starting TRI2a training ..."
+
 if [ -f path.sh ]; then . path.sh; fi
 dir=exp/tri2a
 srcdir=exp/tri1
@@ -99,3 +101,4 @@ done
 
 ( cd $dir; rm final.mdl 2>/dev/null; ln -s $x.mdl final.mdl )
 
+echo "--- Done TRI2a training!"

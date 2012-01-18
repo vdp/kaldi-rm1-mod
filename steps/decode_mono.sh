@@ -17,6 +17,8 @@
 
 # Monophone decoding script.
 
+echo "--- Starting monophone decoding ..."
+
 if [ -f path.sh ]; then . path.sh; fi
 dir=exp/decode_mono
 tree=exp/mono/tree
@@ -40,3 +42,4 @@ grep WER $dir/wer_test | \
   awk '{n=n+$4; d=d+$6} END{ printf("Average WER is %f (%d / %d) \n", (100.0*n)/d, n, d); }' \
    > $dir/wer
 
+echo "--- Monophone decoding DONE!"

@@ -29,6 +29,8 @@
 # You get get some guidance how to deal with channels and segments (not
 # an issue in RM) from ../scripts/make_mfcc_train_segs.sh.
 
+echo "--- Starting data preparation ..."
+
 if [ $# != 1 ]; then
    echo "Usage: ./run.sh /path/to/RM"
    exit 1; 
@@ -118,4 +120,4 @@ cat test.utt2spk | sort -k 2 | ../scripts/utt2spk_to_spk2utt.pl > test.spk2utt
 # Getting lexicon
 ../scripts/make_rm_dict.pl  $RMROOT/conf/pcdsril.txt > lexicon.txt
 
-echo Succeeded.
+echo "--- Done data preparation!"

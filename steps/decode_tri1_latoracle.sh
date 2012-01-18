@@ -19,6 +19,8 @@
 # To view the lattices, a suitable command (after running this) is:
 # gunzip -c exp/decode_tri1_latgen/test_feb89.lat.gz | scripts/int2sym.pl --field 3 data/words.txt | less
 
+echo "--- Starting TRI1_LATORACLE decoding ..."
+
 if [ -f path.sh ]; then . path.sh; fi
 
 beamstotry="0.01 0.5 1 5 10"
@@ -36,27 +38,25 @@ mkdir -p $dir
 inv_acwt=10
 acwt=`perl -e "print (1.0/$inv_acwt);"`
 
-for test in mar87 oct87 feb89 oct89 feb91 sep92; do
+inputlat="ark:gunzip -c $inputdir/test.lat.gz|"
 
-  inputlat="ark:gunzip -c $inputdir/test_${test}.lat.gz|"
-
-  # try pruning beams
-  for beam in $beamstotry; do
-
-    echo "Pruning lattices $inputlat with invacwt=$inv_acwt and beam=$beam"
-    lattice-prune --acoustic-scale=$acwt --beam=$beam \
-      "$inputlat" "ark,t:|gzip -c>$dir/lats.pruned.gz"  \
-           2>$dir/prune.$beam.log
-
-    scripts/latoracle.sh "ark:gunzip -c $dir/lats.pruned.gz|" data_prep/test_${test}_trans.txt $dir ${test}_${beam}
-  done
-
-done
-
+# try pruning beams
 for beam in $beamstotry; do
- echo -n "Beam $beam "
- grep WER $dir/wer_{mar87,oct87,feb89,oct89,feb91,sep92}_${beam} | \
-  awk '{n=n+$4; d=d+$6} END{ printf("Average WER is %f (%d / %d) \n", 100.0*n/d, n, d); }' \
-   | tee $dir/wer_${beam}
+
+  echo "Pruning lattices $inputlat with invacwt=$inv_acwt and beam=$beam"
+  lattice-prune --acoustic-scale=$acwt --beam=$beam \
+    "$inputlat" "ark,t:|gzip -c>$dir/lats.pruned.gz"  \
+         2>$dir/prune.$beam.log
+
+  scripts/latoracle.sh "ark:gunzip -c $dir/lats.pruned.gz|" data_prep/test_trans.txt $dir ${test}_${beam}
 done
 
+
+# for beam in $beamstotry; do
+#  echo -n "Beam $beam "
+#  grep WER $dir/wer_${beam} | \
+#   awk '{n=n+$4; d=d+$6} END{ printf("Average WER is %f (%d / %d) \n", 100.0*n/d, n, d); }' \
+#    | tee $dir/wer_${beam}
+# done
+
+echo "--- Done TRI1_LATORACLE decoding!"

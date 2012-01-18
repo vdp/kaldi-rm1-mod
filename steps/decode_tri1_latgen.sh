@@ -19,6 +19,8 @@
 # To view the lattices, a suitable command (after running this) is:
 # gunzip -c exp/decode_tri1_latgen/test_feb89.lat.gz | scripts/int2sym.pl --field 3 data/words.txt | less
 
+echo "--- Starting TRI1_LATGEN decode"
+
 if [ -f path.sh ]; then . path.sh; fi
 dir=exp/decode_tri1_latgen
 tree=exp/tri1/tree
@@ -29,40 +31,32 @@ mkdir -p $dir
 
 scripts/mkgraph.sh $tree $model $graphdir
 
-for test in mar87 oct87 feb89 oct89 feb91 sep92; do
- (
-  feats="ark:add-deltas --print-args=false scp:data/test_${test}.scp ark:- |"
+feats="ark:add-deltas --print-args=false scp:data/test.scp ark:- |"
 
-  gmm-latgen-simple --beam=20.0 --acoustic-scale=0.08333 --word-symbol-table=data/words.txt $model $graphdir/HCLG.fst "$feats" "ark,t:|gzip -c > $dir/test_${test}.lat.gz" ark,t:$dir/test_${test}.tra ark,t:$dir/test_${test}.ali  2> $dir/decode_${test}.log
+gmm-latgen-simple --beam=20.0 --acoustic-scale=0.08333 --word-symbol-table=data/words.txt $model $graphdir/HCLG.fst "$feats" "ark,t:|gzip -c > $dir/test.lat.gz" ark,t:$dir/test.tra ark,t:$dir/test.ali  2> $dir/decode.log
 
- # the ,p option lets it score partial output without dying..
-  scripts/sym2int.pl --ignore-first-field data/words.txt data_prep/test_${test}_trans.txt | \
-  compute-wer --mode=present ark:-  ark,p:$dir/test_${test}.tra >& $dir/wer_${test}
+# the ,p option lets it score partial output without dying..
+scripts/sym2int.pl --ignore-first-field data/words.txt data_prep/test_trans.txt | \
+  compute-wer --mode=present ark:-  ark,p:$dir/test.tra >& $dir/wer
 
- # Now rescore lattices with various acoustic scales, and compute the WER.
- for inv_acwt in  6 7 8 9 10 11 12 13; do
-   acwt=`perl -e "print (1.0/$inv_acwt);"`
-   lattice-best-path --acoustic-scale=$acwt --word-symbol-table=data/words.txt \
-      "ark:gunzip -c $dir/test_${test}.lat.gz|" ark:$dir/test_${test}.acwt${inv_acwt}.tra \
+# Now rescore lattices with various acoustic scales, and compute the WER.
+for inv_acwt in  6 7 8 9 10 11 12 13; do
+  acwt=`perl -e "print (1.0/$inv_acwt);"`
+  lattice-best-path --acoustic-scale=$acwt --word-symbol-table=data/words.txt \
+    "ark:gunzip -c $dir/test.lat.gz|" ark:$dir/test.acwt${inv_acwt}.tra \
       2>$dir/rescore_${inv_acwt}.log
 
-   scripts/sym2int.pl --ignore-first-field data/words.txt data_prep/test_${test}_trans.txt | \
-    compute-wer --mode=present ark:-  ark,p:$dir/test_${test}.acwt${inv_acwt}.tra \
+  scripts/sym2int.pl --ignore-first-field data/words.txt data_prep/test_trans.txt | \
+  compute-wer --mode=present ark:-  ark,p:$dir/test.acwt${inv_acwt}.tra \
      >& $dir/wer_${inv_acwt}
- done
-
- ) &
-done
-
-wait
 
 
 
-for inv_acwt in "" _6 _7 _8 _9 _10 _11 _12 _13; do
- grep WER $dir/wer_{mar87,oct87,feb89,oct89,feb91,sep92}${inv_acwt} | \
-  awk '{n=n+$4; d=d+$6} END{ printf("Average WER is %f (%d / %d) \n", 100.0*n/d, n, d); }' \
-   > $dir/wer${inv_acwt}
-done
+# for inv_acwt in "" _6 _7 _8 _9 _10 _11 _12 _13; do
+#  grep WER $dir/wer${inv_acwt} | \
+#   awk '{n=n+$4; d=d+$6} END{ printf("Average WER is %f (%d / %d) \n", 100.0*n/d, n, d); }' \
+#    > $dir/wer${inv_acwt}
+# done
 
 
 ### The following commands test some properties of our lattice generation: mainly
@@ -72,12 +66,10 @@ done
 # to be the case.
 
 
-#
-test=mar87
 n=20
 
 for latbeam in 7 10; do
-  feats="ark:head -$n data/test_${test}.scp | add-deltas --print-args=false scp:- ark:- |"
+  feats="ark:head -$n data/test.scp | add-deltas --print-args=false scp:- ark:- |"
   gmm-latgen-simple --lattice-beam=$latbeam --beam=20.0 --acoustic-scale=0.08333 --word-symbol-table=data/words.txt $model $graphdir/HCLG.fst "$feats" "ark,t:|gzip -c > $dir/tmp.${latbeam}.lat.gz"  2> $dir/test_lat.$latbeam.log
   lattice-prune --acoustic-scale=0.08333 --beam=7 "ark:gunzip -c $dir/tmp.${latbeam}.lat.gz|" "ark,t:|gzip -c > $dir/tmp.pr.${latbeam}.lat.gz" 2>$dir/test_prune.$latbeam.log
 done
@@ -102,4 +94,6 @@ lattice-equivalent "ark:gunzip -c $dir/tmp.pr.10.lat.gz|" "ark:gunzip -c $dir/tm
 # The following command checks that the lattice-lmrescore program
 # runs OK and doesn't change the lattices if you apply it twice with opposite
 # weights.
-lattice-lmrescore --lm-scale=1.0 "ark:gunzip -c $dir/test_feb89.lat.gz|" data/G.fst ark:- | lattice-lmrescore --lm-scale=-1.0 ark:- data/G.fst ark:- |  lattice-equivalent ark:- "ark:gunzip -c $dir/test_feb89.lat.gz|" || exit 1;
+lattice-lmrescore --lm-scale=1.0 "ark:gunzip -c $dir/test.lat.gz|" data/G.fst ark:- | lattice-lmrescore --lm-scale=-1.0 ark:- data/G.fst ark:- |  lattice-equivalent ark:- "ark:gunzip -c $dir/test.lat.gz|" || exit 1;
+
+echo "--- Done TRI1_LATGEN"

@@ -61,7 +61,18 @@ steps/make_mfcc.sh $mfccdir train
 steps/make_mfcc.sh $mfccdir test
 
 steps/train_mono.sh
-steps/decode_mono.sh
+steps/decode_mono.sh 
+
+steps/train_tri1.sh
+steps/decode_tri1.sh
+steps/decode_tri1_latgen.sh
+steps/decode_tri1_latoracle.sh
+
+# putting here in case anyone needs ctm output.
+scripts/make_ctms.sh exp/tri1 exp/decode_tri1
+
+steps/train_tri2a.sh
+steps/decode_tri2a.sh
 
 echo 'Main run.sh: End marker reached'
 exit 0

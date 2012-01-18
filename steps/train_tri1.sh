@@ -16,6 +16,8 @@
 
 # To be run from ..
 
+echo "--- Starting TRI1 training ..."
+
 if [ -f path.sh ]; then . path.sh; fi
 dir=exp/tri1
 srcdir=exp/mono
@@ -105,3 +107,5 @@ while [ $x -lt $numiters ]; do
 done
 
 ( cd $dir; rm final.mdl 2>/dev/null; ln -s $x.mdl final.mdl; ln -s $x.occs final.occs )
+
+echo "-- Done TRI1 training!"

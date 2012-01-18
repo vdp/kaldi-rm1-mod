@@ -16,6 +16,8 @@
 
 # To be run from .. (one directory up from here)
 
+echo "--- Start preparing MFCC for $2 ..."
+
 if [ $# != 2 ]; then
     echo "usage: make_mfcc_train.sh <destination_dir> <train OR test>";
     exit 1;
@@ -30,3 +32,4 @@ mkdir -p $out
 pack-sphinx-feats scp:$scpin ark,scp:$out/$2.ark,$out/$2.scp
 cp $out/$2.scp data/$2.scp
 
+echo "--- Done preparing MFCC for $2"
