@@ -122,6 +122,8 @@ bool TrainingGraphCompilerVis::CompileGraph(const fst::VectorFst<fst::StdArc> &w
   
   assert(trans2word_fst.Start() != kNoStateId);
 
+  *hclg_noloop_fst = *out_fst;
+
   // Epsilon-removal and determinization combined. This will fail if not determinizable.
   DeterminizeStarInLog(&trans2word_fst);
 
@@ -137,7 +139,7 @@ bool TrainingGraphCompilerVis::CompileGraph(const fst::VectorFst<fst::StdArc> &w
   // Encoded minimization.
   MinimizeEncoded(&trans2word_fst);
 
-  *hclg_noloop_fst = *out_fst;
+  //*hclg_noloop_fst = *out_fst;
 
   std::vector<int32> disambig;
   AddSelfLoops(trans_model_,
