@@ -1,5 +1,5 @@
 
-root=../kaldi
+root=`pwd`/../kaldi
 #valgrind=yes
 valgrind=no
 

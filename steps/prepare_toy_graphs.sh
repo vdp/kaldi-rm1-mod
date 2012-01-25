@@ -21,8 +21,7 @@
 # The output of this script is the symbol tables data/{words.txt,phones.txt},
 # and the grammars and lexicons data/{L,G}{,_disambig}.fst
 
-# To be run from ..
-if [ -f path.sh ]; then . path.sh; fi
+echo "--- Preparing the toy graphs ..."
 
 mkdir -p data_toy
 scripts/make_rm_lm.pl data_prep/wp_toy.txt > data_toy/G.txt
@@ -90,3 +89,5 @@ fsttablecompose data_toy/L.fst data_toy/G.fst | fstdraw --portrait=false --isymb
 fsttablecompose data_toy/L_disambig.fst data_toy/G.fst | fstdeterminize |  fstdraw --portrait=false --isymbols=data_toy/phones_disambig.txt --osymbols=data_toy/words.txt --portrait=true | dot -Tpdf > $PICDIR/DET_LdG.pdf
 
 fsttablecompose data_toy/L.fst data_toy/G.fst | fstdeterminize | fstdraw --portrait=false --isymbols=data_toy/phones_disambig.txt --osymbols=data_toy/words.txt --portrait=true | dot -Tpdf > $PICDIR/DET_LG.pdf
+
+echo "--- Done toy graph preparation!"
