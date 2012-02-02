@@ -199,7 +199,11 @@ private:
         cout << ", style = " << node_style << ", color = " << kAliColor;
         cout << ", fontsize = 14]\n";
 
+        // Maybe this is a final state? - If so end the reccursion
         bool is_final = (fst_.Final(state) != Weight::Zero());
+        if (is_final && ali_idx_ == ali_.size())
+            return true;
+
 
         ISymArcMap isym_to_arc;
         for (fst::ArcIterator<Fst> aiter(fst_, state); !aiter.Done(); aiter.Next())
@@ -228,11 +232,8 @@ private:
             }
         } while (arc_found);
 
-        // No no-eps transitions to other states found ...
-        // Maybe this is a final state?
-        if (is_final) {
+        if (is_final && ali_idx_ == ali_.size())
             return true;
-        }
 
         // if not final, try making an eps transition
         typename unordered_map<Label, const Arc*>::iterator it =
@@ -240,7 +241,6 @@ private:
         if (it != isym_to_arc.end()) {
             DrawArc(state, *(it->second), kAliColor, 1);
             StateId nextstate = it->second->nextstate;
-            //isym_to_arc.erase(it);
             UpdateAliState(state, isym_to_arc, it->first);
             return DrawAliState(nextstate);
         }
