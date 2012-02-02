@@ -25,5 +25,8 @@ mkdir -p data_toy
 steps/prepare_toy_graphs.sh
 
 # Visualize the stages in a training graph's composition (monophone and triphone)
-steps/visualize-train-graphs.sh data_toy/train/mono data_toy/pictures/train/mono mono
+steps/visualize-train-graphs.sh data_toy/train/mono data_toy/pictures/train/mono mono 
 steps/visualize-train-graphs.sh data_toy/train/tri1 data_toy/pictures/train/tri1 tri1
+
+# Visualization of the alignments for some utterance during some training passes
+steps/visualize-train-ali.sh data_toy/pictures/train/mono mono

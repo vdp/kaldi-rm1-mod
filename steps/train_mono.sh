@@ -55,7 +55,7 @@ compile-train-graphs $dir/tree $dir/0.mdl  data/L.fst \
 echo Pass 0
 
 align-equal-compiled "ark:gunzip -c $dir/graphs.fsts.gz|" "$feats" \
-   ark,t,f:-  2>$dir/align.0.log | \
+   ark,t,f:-  2>$dir/align.0.log | tee $dir/0.ali | \
  gmm-acc-stats-ali --binary=true $dir/0.mdl "$feats" ark:- \
      $dir/0.acc 2> $dir/acc.0.log  || exit 1;
 
@@ -64,7 +64,7 @@ align-equal-compiled "ark:gunzip -c $dir/graphs.fsts.gz|" "$feats" \
 gmm-est --min-gaussian-occupancy=3  --mix-up=$numgauss \
     $dir/0.mdl $dir/0.acc $dir/1.mdl 2> $dir/update.0.log || exit 1;
 
-rm $dir/0.acc
+#rm $dir/0.acc
 
 
 beam=4 # will change to 8 below after 1st pass
@@ -79,7 +79,8 @@ while [ $x -lt $numiters ]; do
   fi
   gmm-acc-stats-ali --binary=false $dir/$x.mdl "$feats" ark:$dir/cur.ali $dir/$x.acc 2> $dir/acc.$x.log  || exit 1;
   gmm-est --mix-up=$numgauss $dir/$x.mdl $dir/$x.acc $dir/$[$x+1].mdl 2> $dir/update.$x.log || exit 1;
-  rm $dir/$x.mdl $dir/$x.acc
+  #rm $dir/$x.mdl $dir/$x.acc
+  cp $dir/cur.ali $dir/$x.ali
   if [ $x -le $maxiterinc ]; then
      numgauss=$[$numgauss+$incgauss];
   fi
