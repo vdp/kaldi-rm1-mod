@@ -15,7 +15,7 @@
 # See the Apache 2 License for the specific language governing permissions and
 # limitations under the License.
 
-echo "--- Starting training graph visualization ..."  
+echo "--- Starting training graph visualization ($3) ..."  
 
 scriptdir=$1
 picdir=$2
@@ -75,4 +75,4 @@ fstdraw --portrait=true --isymbols=$scriptdir/transid_syms.txt --osymbols=data/w
 # The final HCLG graph
 fstdraw --portrait=true --isymbols=$scriptdir/transid_syms.txt --osymbols=data/words.txt $scriptdir/train.fst | dot -Tpdf > $picdir/train.pdf
 
-echo "--- Done training graph visualization!"
+echo "--- Done training graph visualization ($stage) !"
