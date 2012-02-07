@@ -25,7 +25,8 @@ if [ -f path.sh ]; then . path.sh; fi
 
 mkdir -p data
 cp data_prep/G.txt data/
-scripts/make_words_symtab.pl < data/G.txt > data/words.txt
+cat data/lexicon.txt | awk 'BEGIN{print "<eps>\t0";} {print $1 "\t" NR;} END{print "!SIL\t" NR+1;}' > data/words.txt
+
 cp data_prep/lexicon.txt data/
 
 scripts/make_phones_symtab.pl < data/lexicon.txt > data/phones.txt
