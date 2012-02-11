@@ -1,0 +1,85 @@
+diff --git a/src/tree/event-map.h b/src/tree/event-map.h
+index bc1c489..ae02a2d 100644
+--- a/src/tree/event-map.h
++++ b/src/tree/event-map.h
+@@ -76,6 +76,22 @@ struct EventMapVectorEqual {  // Equality object for EventType pointers-- test e
+   size_t operator () (const EventType* p1, const EventType *p2) { return (*p1 == *p2); }
+ };
+ 
++class EventMap;
++
++/// Abstract visitor interface to be implemented by the classes, that need to walk
++/// the event map tree
++class EventMapVisitor {
++public:
++    virtual void VisitConst(const EventAnswerType &answer) = 0;
++
++    virtual void VisitSplit(EventKeyType &key,
++                    ConstIntegerSet<EventValueType> &yes_set,
++                    EventMap *yes_map,
++                    EventMap *no_map) = 0;
++
++    virtual void VisitTable(const EventKeyType &key,
++                            std::vector<EventMap*> &table) = 0;
++};
+ 
+ /// A class that is capable of representing a generic mapping from
+ /// EventType (which is a vector of (key, value) pairs) to
+@@ -130,11 +146,15 @@ class EventMap {
+ 
+   virtual ~EventMap() {}
+ 
++  virtual void Accept(EventMapVisitor &visitor) = 0;
++
+   /// a Write function that takes care of NULL pointers.
+   static void Write(std::ostream &os, bool binary, EventMap *emap);
+   /// a Read function that reads an arbitrary EventMap; also
+   /// works for NULL pointers.
+   static EventMap *Read(std::istream &is, bool binary);
++
++
+ };
+ 
+ 
+@@ -162,6 +182,11 @@ class ConstantEventMap: public EventMap {
+   explicit ConstantEventMap(EventAnswerType answer): answer_(answer) { }
+   
+   virtual void Write(std::ostream &os, bool binary);
++
++  virtual void Accept(EventMapVisitor &visitor) {
++    visitor.VisitConst(answer_);
++  }
++
+   static ConstantEventMap *Read(std::istream &is, bool binary);
+  private:
+   EventAnswerType answer_;
+@@ -198,6 +223,10 @@ class TableEventMap: public EventMap {
+     }
+   }
+ 
++  virtual void Accept(EventMapVisitor &visitor) {
++    visitor.VisitTable(key_, table_);
++  }
++
+   /// Takes ownership of pointers.
+   explicit TableEventMap(EventKeyType key, const std::vector<EventMap*> &table): key_(key), table_(table) {}
+   /// Takes ownership of pointers.
+@@ -268,6 +297,10 @@ class SplitEventMap: public EventMap {  // A decision tree [non-leaf] node.
+ 
+   virtual ~SplitEventMap() { Destroy(); }
+ 
++  virtual void Accept(EventMapVisitor &visitor) {
++    visitor.VisitSplit(key_, yes_set_, yes_, no_);
++  }
++
+   /// This constructor takes ownership of the "yes" and "no" arguments.
+   SplitEventMap(EventKeyType key, const std::vector<EventValueType> &yes_set,
+                 EventMap *yes, EventMap *no): key_(key), yes_set_(yes_set), yes_(yes), no_(no) {
+@@ -275,7 +308,6 @@ class SplitEventMap: public EventMap {  // A decision tree [non-leaf] node.
+     assert(yes_ != NULL && no_ != NULL);
+   }
+ 
+-
+  private:
+   /// This constructor used in the Copy() function.
+   SplitEventMap(EventKeyType key, const ConstIntegerSet<EventValueType> &yes_set,
