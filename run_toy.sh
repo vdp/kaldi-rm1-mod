@@ -30,3 +30,7 @@ steps/visualize-train-graphs.sh data_toy/train/tri1 data_toy/pictures/train/tri1
 
 # Visualization of the alignments for some utterance during some training passes
 steps/visualize-train-ali.sh data_toy/pictures/train/mono mono
+
+# Draw some phonetic trees
+steps/visualize-trees.sh data_toy/pictures/train/mono mono "1/k"
+steps/visualize-trees.sh data_toy/pictures/train/tri1 tri1 "0/ax/k/ch"
