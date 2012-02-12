@@ -71,7 +71,7 @@ gmm-init-model  --write-occs=$dir/1.occs  \
 gmm-mixup --mix-up=$numgauss $dir/1.mdl $dir/1.occs $dir/1.mdl \
    2>$dir/mixup.log || exit 1;
 
-rm $dir/treeacc
+#rm $dir/treeacc
 
 # Convert alignments generated from monophone model, to use as initial alignments.
 
@@ -80,7 +80,7 @@ convert-ali $srcmodel $dir/1.mdl $dir/tree ark:$dir/0.ali ark:$dir/cur.ali 2>$di
   convert-ali $dir/1.mdl $srcmodel $srcdir/tree ark:$dir/cur.ali ark:- \
    2>/dev/null | cmp - $dir/0.ali || exit 1; 
 
-rm $dir/0.ali
+#rm $dir/0.ali
 
 # Make training graphs
 echo "Compiling training graphs"
@@ -95,11 +95,12 @@ while [ $x -lt $numiters ]; do
      gmm-align-compiled $scale_opts --beam=8 --retry-beam=40 $dir/$x.mdl \
              "ark:gunzip -c $dir/graphs.fsts.gz|" "$feats" \
              ark:$dir/cur.ali 2> $dir/align.$x.log || exit 1;
+     cp $dir/cur.ali $dir/$x.ali
    fi
    gmm-acc-stats-ali --binary=false $dir/$x.mdl "$feats" ark:$dir/cur.ali $dir/$x.acc 2> $dir/acc.$x.log  || exit 1;
    gmm-est --write-occs=$dir/$[$x+1].occs --mix-up=$numgauss $dir/$x.mdl $dir/$x.acc $dir/$[$x+1].mdl 2> $dir/update.$x.log || exit 1;
-   rm $dir/$x.mdl $dir/$x.acc
-   rm $dir/$x.occs 
+   #rm $dir/$x.mdl $dir/$x.acc
+   #rm $dir/$x.occs 
    if [[ $x -le $maxiterinc ]]; then 
       numgauss=$[$numgauss+$incgauss];
    fi

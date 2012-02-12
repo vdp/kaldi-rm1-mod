@@ -29,8 +29,13 @@ steps/visualize-train-graphs.sh data_toy/train/mono data_toy/pictures/train/mono
 steps/visualize-train-graphs.sh data_toy/train/tri1 data_toy/pictures/train/tri1 tri1
 
 # Visualization of the alignments for some utterance during some training passes
-steps/visualize-train-ali.sh data_toy/pictures/train/mono mono
+steps/visualize-train-ali.sh data_toy/pictures/train/mono mono "0 1 5 10 20" 
+steps/visualize-train-ali.sh data_toy/pictures/train/tri1 tri1 "5 10 20"
 
 # Draw some phonetic trees
 steps/visualize-trees.sh data_toy/pictures/train/mono mono "1/k"
 steps/visualize-trees.sh data_toy/pictures/train/tri1 tri1 "0/ax/k/ch"
+
+# Visualize the decoding graphs/alignments
+# (the features were extracted using the default parameters of
+#  "wave2feat" tool from SphinxTrain)

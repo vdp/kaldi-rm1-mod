@@ -21,8 +21,8 @@ picdir=$1
 stage=$2
 dir=exp/$2
 niters=30 # should match the #of iteration in the training script
-show_tids=false
-draw_iters="0 1 5 15 25" # should correspond to a subset of the realignment passes
+show_tids=false # make it true if you want to also see the trans-ids on input labels
+draw_iters=$3 # should correspond to a subset of the realignment passes
 
 mkdir -p $picdir
 
@@ -36,8 +36,8 @@ while [ $x -lt $niters ]; do
     if echo $draw_iters | egrep -w $x > /dev/null; then
 	draw-ali --key=$utt --show-tids=$show_tids data/phones_disambig.txt\
            data/words.txt $dir/$x.mdl ark:$dir/$x.ali \
-           "ark:gunzip -c $dir/graphs.fsts.gz|" | \
-           dot -Tpdf > $picdir/${utt}_${x}.pdf
+           "ark:gunzip -c $dir/graphs.fsts.gz |" | \
+           dot -Tpdf > $picdir/${utt}_ali_${x}.pdf
     fi
     x=$[$x + 1]
 done
