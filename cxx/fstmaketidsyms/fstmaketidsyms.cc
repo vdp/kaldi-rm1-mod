@@ -26,6 +26,7 @@ int main(int argc, char **argv)
     try {
         std::string sep = "_";
         bool verbose = false;
+        bool show_tids = false;
         const char *usage = "Outputs symbolic names for all transition ids"
                 "(can be used in graph visualizations)\n"
                 "The format of the output is phone_hmm-state_pdfid_transidx tid"
@@ -34,6 +35,7 @@ int main(int argc, char **argv)
         ParseOptions po(usage);
         po.Register("separator", &sep, "The symbol to be used as separator b/w tid's constituents");
         po.Register("verbose-output", &verbose, "Verbose output to stderr?");
+        po.Register("show-tids", &show_tids, "Also show the transitions IDs");
         po.Read(argc, argv);
         if (po.NumArgs() < 2 || po.NumArgs() > 3) {
             po.PrintUsage();
@@ -73,6 +75,8 @@ int main(int argc, char **argv)
             int pdf = trans_model.TransitionIdToPdf(tid);
             int trans = trans_model.TransitionIdToTransitionIndex(tid);
             oss << sep << hmmstate << sep << pdf << sep << trans;
+            if (show_tids)
+                oss << '[' << tid << ']';
             tidsymtab.AddSymbol(oss.str(), tid);
             if (verbose)
                 KALDI_LOG << "TransID:" << tid << "; PhoneID:" << phnid <<
