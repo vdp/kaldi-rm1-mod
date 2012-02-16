@@ -26,42 +26,45 @@
 
 namespace kaldi {
 
-template<class A> class AlignmentDrawer
+template<class F> class AlignmentDrawer
 {
 public:
-    typedef A Arc;
-    typedef typename fst::Fst<Arc> Fst;
+    typedef F Fst;
+    typedef typename Fst::Arc Arc;
     typedef typename Arc::StateId StateId;
     typedef typename Arc::Label Label;
     typedef typename Arc::Weight Weight;
-    typedef kaldi::int32 AliIdx;
-    typedef std::vector<AliIdx> Ali;
-    typedef typename std::tr1::unordered_map<Label, const Arc* > ISymArcMap;
-    typedef typename std::tr1::unordered_map<StateId, ISymArcMap> StateMap;
+    typedef typename fst::ArcIterator<Fst> ArcIterator;
+    typedef std::vector<kaldi::int32> Alignment;
+    typedef std::pair<StateId, size_t> FstTracePoint;
+    typedef std::vector<FstTracePoint> FstTrace;
+    typedef std::tr1::unordered_set<size_t> TraceArcs;
+    typedef std::tr1::unordered_map<StateId, TraceArcs> TraceMap;
 
-    const std::string kAliColor;
-    const std::string kNonAliColor;
+    static const std::string kAliColor;
+    static const std::string kNonAliColor;
+    static const int kEpsLabel = 0;
 
     AlignmentDrawer(const Fst &fst, TransitionModel &tmodel,
                     const std::vector<kaldi::int32> &ali,
                     fst::SymbolTable &phone_syms,
                     fst::SymbolTable &word_syms,
-                    const char *sep, bool show_tids):
-        kAliColor("red"), kNonAliColor("black"), fst_(fst),
-        tmodel_(tmodel), ali_(ali), phone_syms_(phone_syms),
-        word_syms_(word_syms), sep_(sep), show_tids_(show_tids) {}
+                    const char *sep, bool show_tids, bool ali_only):
+        fst_(fst), tmodel_(tmodel), ali_(ali), phone_syms_(phone_syms),
+        word_syms_(word_syms), sep_(sep),
+        show_tids_(show_tids), ali_only_(ali_only) {}
+
 
     void Draw()
     {
-        DrawHeader();
-        DrawFst();
-        DrawFooter();
-    }
-
-private:
-    void DrawHeader()
-    {
         using namespace std;
+        bool found = FindTrace();
+        if (!found) {
+            KALDI_WARN << "No alignment has been found!";
+            return;
+        }
+
+        // DOT header
         cout << "digraph FST {\n"
                 "rankdir = LR;\n"
                 "size = \"8.5,11\";\n"
@@ -70,11 +73,65 @@ private:
                 "orientation = Portrait;\n"
                 "ranksep = \"0.4\";\n"
                 "nodesep = \"0.25\";\n";
+
+        DrawTrace();
+        if (!ali_only_)
+            DrawRest();
+
+        // DOT footer
+        cout << "}\n";
     }
 
-    void DrawFooter()
-    {
-        std::cout << "}\n";
+private:
+
+    void DrawRest() {
+        fst::StateIterator<Fst> sti(fst_);
+        for (; !sti.Done(); sti.Next()) {
+            StateId state = sti.Value();
+            typename TraceMap::iterator tmi = trace_map_.find(state);
+            bool state_traced = (tmi != trace_map_.end());
+            if (!state_traced)
+                DrawState(state, kNonAliColor);
+            ArcIterator ai(fst_, state);
+            for (; !ai.Done(); ai.Next()) {
+                if (!state_traced)
+                    DrawArc(state, ai.Value(), 1, kNonAliColor);
+                else if (tmi->second.find(ai.Position()) == tmi->second.end())
+                    DrawArc(state, ai.Value(), 1, kNonAliColor);
+            }
+        }
+    }
+
+    /// Creates a map: state -> all out arcs which belong to the alignment trace
+    void UpdateTraceMap(StateId &state, size_t arc) {
+        typename TraceMap::iterator tmi = trace_map_.find(state);
+        if (tmi == trace_map_.end()) {
+            // This is the first time we visit this state - init its arc set
+            TraceArcs arcs;
+            arcs.insert(arc);
+            trace_map_.insert(std::make_pair(state, arcs));
+        }
+        else {
+            tmi->second.insert(arc);
+        }
+    }
+
+    void DrawState(StateId state, const std::string &color) {
+        using namespace std;
+
+        string node_style = "solid";
+        string node_shape = "circle";
+        if (state == fst_.Start())
+            node_style = "bold";
+        if (fst_.Final(state) != Weight::Zero())
+            node_shape = "doublecircle";
+        ostringstream label;
+        label << state;
+        if (fst_.Final(state) != Weight::Zero())
+            label << " / " << fst_.Final(state);
+
+        cout << state << " [label = \"" << label.str() << "\", shape = " << node_shape;
+        cout << ", style = " << node_style << ", color = " << color << "];\n";
     }
 
     std::string MakeLabel(const Arc &arc, int count)
@@ -107,177 +164,157 @@ private:
     }
 
     void DrawArc(const StateId &state, const Arc &arc,
-                 const std::string color, int count)
-    {
+                 const int count, const std::string &color) {
         using namespace std;
 
         cout << "\t" << state << " -> " << arc.nextstate;
         cout << " [ label = \"" << MakeLabel(arc, count) << "\", ";
         cout << "color = " << color << ", fontcolor = " << color;
-        cout << ", fontsize = 14 ];\n";
+        cout << "];\n";
     }
 
-    /// Draws the nodes which are not in the alignment
-    void DrawState(const StateId &state)
-    {
-        using namespace std;
+    void DrawTrace() {
+        int t;
+        for (t = 0; t < fst_trace_.size();) {
+            StateId state = fst_trace_[t].first;
+            size_t arc_pos = fst_trace_[t].second;
+            ArcIterator ait(fst_, state);
+            ait.Seek(arc_pos);
+            const Arc &arc = ait.Value();
+            int count = 1;
+            while (++t < fst_trace_.size() &&
+                   fst_trace_[t].first == state &&
+                   fst_trace_[t].second == arc_pos)
+                ++ count;
 
-        string node_style = "solid";
-        string node_shape = "circle";
-        KALDI_ASSERT(state != fst_.Start());
-        if (fst_.Final(state) != Weight::Zero())
-            node_shape = "doublecircle";
-        ostringstream label;
-        label << state;
-        if (fst_.Final(state) != Weight::Zero())
-            label << " / " << fst_.Final(state);
+            typename TraceMap::const_iterator tmi = trace_map_.find(state);
+            if (tmi == trace_map_.end())
+                // This is the first time we reach this state - draw it
+                DrawState(state, kAliColor);
 
-        // first draw the node itself
-        cout << state << " [label = \"" << label.str() << "\", shape = " << node_shape;
-        cout << ", style = " << node_style << ", color = " << kNonAliColor;
-        cout << ", fontsize = 14]\n";
-
-        // ... and then the outgoing arcs
-        for (fst::ArcIterator<Fst> aiter(fst_, state); !aiter.Done(); aiter.Next())
-            DrawArc(state, aiter.Value(), kNonAliColor, 1);
-
-    }
-
-    void DrawNonAliArcs()
-    {
-        typename StateMap::const_iterator stit;
-        for (stit = ali_states_.begin(); stit != ali_states_.end(); stit++) {
-            StateId state = stit->first;
-            const ISymArcMap &isym_arc = stit->second;
-            typename ISymArcMap::const_iterator arcit;
-            for (arcit = isym_arc.begin(); arcit != isym_arc.end(); arcit++)
-                DrawArc(state, *(arcit->second), kNonAliColor, 1);
+            DrawArc(state, arc, count, kAliColor);
+            UpdateTraceMap(state, arc_pos);
         }
     }
 
-    /// Update the map stateId -> non_alignment arcs
-    void UpdateAliState(const StateId &state,
-                        ISymArcMap &isym_to_arc,
-                        const Label &ali_label)
+    // Describes a particular state of the alignment-matching process
+    struct AliHypothesys {
+        AliHypothesys(StateId state, size_t arc,
+                      size_t ali_idx, size_t fst_ali_len):
+            state(state), arc(arc),
+            ali_idx(ali_idx), fst_ali_len(fst_ali_len) {}
+
+        StateId state; // state ID
+        size_t arc;  // the index of an outgoing arc of "state"
+        size_t ali_idx; // points to the trans-id to be matched by state/arc
+        size_t fst_ali_len; // the length of the fst state/arc sequence that agrees with
+                            // state-id subsequence from 0 to ali_idx inclusive
+    };
+
+    template <typename S>
+    struct VisitedHash {
+        size_t operator() (const std::pair<S, size_t> &entry) const {
+            return (entry.first << 16) + entry.second;
+        }
+    };
+
+    template <typename S>
+    struct VisitedEqual {
+        bool operator() (const std::pair<S, size_t> &a,
+                         const std::pair<S, size_t> &b) const {
+            return (a.first == b.first && a.second == b.second);
+        }
+    };
+
+    bool FindTrace()
     {
-        typename StateMap::iterator it = ali_states_.find(state);
-        if (it != ali_states_.end()) {
-            // If the input label of an arc belonging to the alignment is
-            // still in the list of the non-ali arcs - remove it
-            typename ISymArcMap::iterator itlab = it->second.find(ali_label);
-            if (itlab != it->second.end()) {
-                it->second.erase(itlab);
+        fst_trace_.clear();
+        std::vector<AliHypothesys> hypotheses;
+
+        // <state, alignment_prefix> to avoid e.g. <eps> loops
+        std::tr1::unordered_set<
+                std::pair<StateId, size_t>,
+                VisitedHash<StateId>, VisitedEqual<StateId> > visited;
+
+        StateId start = fst_.Start();
+        if (start == fst::kNoStateId)
+            return false;
+
+        // Init the hypotheses queue
+        size_t ali_idx = 0;
+        size_t fst_ali_len = 0;
+        for (ArcIterator aiter(fst_, start); !aiter.Done(); aiter.Next()) {
+            const Arc &arc = aiter.Value();
+            if (arc.ilabel == kEpsLabel || arc.ilabel == ali_[ali_idx]) {
+                hypotheses.push_back(
+                            AliHypothesys(start, aiter.Position(),
+                                          ali_idx, fst_ali_len));
             }
         }
-        else {
-            // If the state is not in the list of the nodes in the alignemnt - add it
-            ali_states_[state] = isym_to_arc;
-            it = ali_states_.find(state);
-            typename ISymArcMap::iterator itlab = it->second.find(ali_label);
-            KALDI_ASSERT(itlab != it->second.end());
-            it->second.erase(itlab);
-        }
-    }
+        visited.insert(std::make_pair(start, ali_idx));
 
-    bool DrawAliState(const StateId& state)
-    {
-        using namespace std;
+        // Test and extend/backtrack alignments as needed
+        while (!hypotheses.empty()) {
+            AliHypothesys hyp = hypotheses.back();
+            hypotheses.pop_back();
 
-        string node_style = "solid";
-        string node_shape = "circle";
-        if (state == fst_.Start())
-            node_style = "bold";
-        if (fst_.Final(state) != Weight::Zero())
-            node_shape = "doublecircle";
-        ostringstream label;
-        label << state;
-        if (fst_.Final(state) != Weight::Zero())
-            label << " / " << fst_.Final(state);
+            ali_idx = hyp.ali_idx;
+            ArcIterator ait(fst_, hyp.state);
+            ait.Seek(hyp.arc);
+            const Arc &arc = ait.Value();
+            KALDI_ASSERT(arc.ilabel == kEpsLabel ||
+                         arc.ilabel == ali_[ali_idx]);
+            if (arc.ilabel != kEpsLabel)
+                ++ ali_idx;
 
-        // Draw the state itself
-        cout << state << " [label = \"" << label.str() << "\", shape = " << node_shape;
-        cout << ", style = " << node_style << ", color = " << kAliColor;
-        cout << ", fontsize = 14]\n";
-
-        // Maybe this is a final state? - If so end the reccursion
-        bool is_final = (fst_.Final(state) != Weight::Zero());
-        if (is_final && ali_idx_ == ali_.size())
-            return true;
-
-
-        ISymArcMap isym_to_arc;
-        for (fst::ArcIterator<Fst> aiter(fst_, state); !aiter.Done(); aiter.Next())
-            isym_to_arc[aiter.Value().ilabel] = &(aiter.Value());
-
-        bool arc_found;
-        do {
-            arc_found = false;
-            Label isym = ali_[ali_idx_];
-            typename ISymArcMap::iterator it =
-                    isym_to_arc.find(static_cast<Label>(isym));
-            if (it != isym_to_arc.end()) {
-                arc_found = true;
-                int count = 0;
-                do {
-                    ++ ali_idx_;
-                    ++ count;
-                } while (ali_[ali_idx_] == isym);
-                DrawArc(state, *(it->second), kAliColor, count);
-                StateId nextstate = it->second->nextstate;
-                UpdateAliState(state, isym_to_arc, it->first);
-                if (nextstate != state) {
-                    // An alignment arc out of this state is found - hit the road
-                    return DrawAliState(nextstate);
-                }
+            if (hyp.fst_ali_len < fst_trace_.size()) {
+                //backtrack
+                typename FstTrace::iterator ftit = fst_trace_.begin() + hyp.fst_ali_len;
+                fst_trace_.erase(ftit, fst_trace_.end());
             }
-        } while (arc_found);
+            fst_trace_.push_back(std::make_pair(hyp.state, hyp.arc));
 
-        if (is_final && ali_idx_ == ali_.size())
-            return true;
+            StateId nextstate = arc.nextstate;
+            if (ali_idx == ali_.size() && fst_.Final(nextstate) != Weight::Zero())
+                return true;
 
-        // if not final, try making an eps transition
-        typename unordered_map<Label, const Arc*>::iterator it =
-                isym_to_arc.find(static_cast<Label>(0));
-        if (it != isym_to_arc.end()) {
-            DrawArc(state, *(it->second), kAliColor, 1);
-            StateId nextstate = it->second->nextstate;
-            UpdateAliState(state, isym_to_arc, it->first);
-            return DrawAliState(nextstate);
+            if (visited.find(std::make_pair(nextstate, ali_idx))
+                    != visited.end())
+                continue; // this state/alignment pair was already considered
+
+            // Extend the current hypothesis
+            visited.insert(std::make_pair(nextstate, ali_idx));
+            ArcIterator nait(fst_, nextstate);
+            for (; !nait.Done(); nait.Next()) {
+                const Arc &narc = nait.Value();
+                if (narc.ilabel == kEpsLabel || narc.ilabel == ali_[ali_idx])
+                    hypotheses.push_back(AliHypothesys(nextstate, nait.Position(),
+                                                       ali_idx, fst_trace_.size()));
+            }
         }
 
-        return false; // the alignment couldn't be matched with the graph
+        return false; // no alignment has been found
     }
 
-    void DrawFst()
-    {
-        using namespace std::tr1;
+    FstTrace fst_trace_;
 
-        ali_idx_ = 0;
-        ali_states_.clear();
-        if (!DrawAliState(fst_.Start())) {
-            KALDI_ERR << "Couldn't match the alignment and the graph!";
-            return;
-        }
-        DrawNonAliArcs();
-        for (fst::StateIterator<Fst> si(fst_); !si.Done(); si.Next()) {
-            typename StateMap::iterator it =
-                    ali_states_.find(si.Value());
-            if (it == ali_states_.end())
-                DrawState(si.Value()); // only draw states not in the alignment
-        }
-    }
+    // A map from a state that belongs to the alignment trace
+    // to its output arcs that belong to the trace
+    TraceMap trace_map_;
 
-    kaldi::int32 ali_idx_;
-    StateMap ali_states_;
-
-    const fst::Fst<A> &fst_;
-    const kaldi::TransitionModel &tmodel_;
-    const std::vector<kaldi::int32> &ali_;
+    const Fst &fst_;
+    const TransitionModel &tmodel_;
+    const Alignment &ali_;
     const fst::SymbolTable &phone_syms_;
     const fst::SymbolTable &word_syms_;
     const std::string sep_;
     const bool show_tids_;
-}; // class AliDrawer
+    const bool ali_only_;
+};
+
+template<typename F> const std::string AlignmentDrawer<F>::kAliColor = "red";
+template<typename F> const std::string AlignmentDrawer<F>::kNonAliColor = "black";
+
 } // namespace kaldi
 
 int main(int argc, char *argv[])
@@ -287,12 +324,14 @@ int main(int argc, char *argv[])
     try {
         std::string key = "";
         bool show_tids = false;
+        bool ali_only = false;
 
         const char *usage = "Visualizes an alignment using GraphViz DOT language\n"
-                "Usage: draw-alignments --ali-key=some_key <phone-syms> <word-syms> <model> <ali-rspec> <fst-rspec>\n\n";
+                "Usage: draw-ali [options] <phone-syms> <word-syms> <model> <ali-rspec> <fst-rspec>\n\n";
         ParseOptions po(usage);
         po.Register("key", &key, "The key of the alignment/fst we want to render(mandatory!)");
         po.Register("show-tids", &show_tids, "Also shows the transition-ids");
+        po.Register("ali-only", &ali_only, "Draw only the states/arcs in the alignment");
         po.Read(argc, argv);
         if (po.NumArgs() != 5 || key == "") {
             po.PrintUsage();
@@ -343,11 +382,13 @@ int main(int argc, char *argv[])
         }
 
         const std::vector<kaldi::int32> &ali = ali_reader.Value(key);
-        const fst::Fst<fst::StdArc> &graph = fst_reader.Value(key);
+        const fst::VectorFst<fst::StdArc> &graph = fst_reader.Value(key);
 
-        AlignmentDrawer<fst::StdArc> drawer(graph, trans_model,
-                                        ali, *phones_symtab, *words_symtab,
-                                        (const char *) "_", show_tids);
+        typedef AlignmentDrawer<fst::VectorFst<fst::StdArc> > Drawer;
+        Drawer drawer(graph, trans_model,
+                      ali, *phones_symtab, *words_symtab,
+                      (const char *) "_", show_tids, ali_only);
+
         drawer.Draw();
 
         delete phones_symtab;
