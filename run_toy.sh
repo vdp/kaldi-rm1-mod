@@ -22,7 +22,7 @@
 if [ -f path.sh ]; then . path.sh; fi
 
 mkdir -p data_toy
-steps/prepare_toy_graphs.sh
+steps/prepare_toy_graphs.sh data_toy/pictures/graphs
 
 # Visualize the stages in a training graph's composition (monophone and triphone)
 steps/visualize-train-graphs.sh data_toy/train/mono data_toy/pictures/train/mono mono 
@@ -39,3 +39,11 @@ steps/visualize-trees.sh data_toy/pictures/train/tri1 tri1 "0/ax/k/ch"
 # Visualize the decoding graphs/alignments
 # (the features were extracted using the default parameters of
 #  "wave2feat" tool from SphinxTrain)
+
+# Prepare the features
+echo "toy data_prep/toy.mfcc" > data_toy/sphinx_test.scp
+pack-sphinx-feats scp:data_toy/sphinx_test.scp ark,scp:mfcc/toy.ark,data_toy/test.scp
+
+# Render the results
+steps/visualize-decode-ali.sh data_toy/pictures/decode/mono mono
+steps/visualize-decode-ali.sh data_toy/pictures/decode/tri1 tri1

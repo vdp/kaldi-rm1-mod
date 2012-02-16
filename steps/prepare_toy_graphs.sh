@@ -23,20 +23,21 @@
 
 echo "--- Preparing the toy graphs ..."
 
+PICDIR=$1
+mkdir -p $PICDIR
+
 mkdir -p data_toy
 scripts/make_rm_lm.pl data_prep/wp_toy.txt > data_toy/G.txt
 scripts/make_words_symtab.pl < data_toy/G.txt > data_toy/words.txt
 egrep '^((NOT)|(KNOT )|(SHIP )|(FIVE)|(!SIL))' data_prep/lexicon.txt > data_toy/lexicon.txt
 
-scripts/make_phones_symtab.pl < data_toy/lexicon.txt > data_toy/phones.txt
-
-silphones="sil"; # This would in general be a space-separated list of all silence phones.  E.g. "sil vn"
-# Generate colon-separated lists of silence and non-silence phones.
-scripts/silphones.pl data_toy/phones.txt "$silphones" data_toy/silphones.csl data_toy/nonsilphones.csl
-
 ndisambig=`scripts/add_lex_disambig.pl data_toy/lexicon.txt data_toy/lexicon_disambig.txt`
-ndisambig=$[$ndisambig+1]; # add one disambig symbol for silence in lexicon FST.
-scripts/add_disambig.pl data_toy/phones.txt $ndisambig > data_toy/phones_disambig.txt
+
+# The phones should correspond exactly to those for which the models were trained
+cp data/silphones.csl data_toy/silphones.csl
+cp data/nonsilphones.csl data_toy/nonsilphones.csl
+cp data/phones_disambig.txt data_toy/phones_disambig.txt
+cp data/phones.txt data_toy/phones.txt
 
 # Create train transcripts in integer format: 
 #(For now this is not needed for the toy example)
@@ -69,8 +70,8 @@ fsttablecompose data_toy/L.fst data_toy/G.fst | fstisstochastic || echo Error
 fstprint   --isymbols=data_toy/phones.txt --osymbols=data_toy/words.txt data_toy/L.fst  | head
 
 # Make some pretty pictures
-PICDIR=data_toy/pictures
-mkdir $PICDIR
+
+echo "Graph images will be stored in $PICDIR"
 
 cat data_toy/G.fst | fstdraw --isymbols=data_toy/words.txt --osymbols=data_toy/words.txt --portrait=true | dot -Tpdf > $PICDIR/G.pdf
 
