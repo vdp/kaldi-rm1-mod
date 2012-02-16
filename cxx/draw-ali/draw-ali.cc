@@ -345,7 +345,6 @@ int main(int argc, char *argv[])
         std::string fst_rspec = po.GetArg(5);
 
         RandomAccessTableReader<BasicVectorHolder<kaldi::int32> > ali_reader(ali_rspec);
-        RandomAccessTableReader<fst::VectorFstHolder> fst_reader(fst_rspec);
 
         fst::SymbolTable *phones_symtab = NULL;
         {
@@ -375,17 +374,26 @@ int main(int argc, char *argv[])
                       << "' has been found in '" << ali_rspec << "'";
             exit(1);
         }
-        if (!fst_reader.HasKey(key)) {
-            KALDI_ERR << "No FST with key '" << key
-                      << "' has been found in '" << fst_rspec << "'";
-            exit(1);
-        }
 
         const std::vector<kaldi::int32> &ali = ali_reader.Value(key);
-        const fst::VectorFst<fst::StdArc> &graph = fst_reader.Value(key);
+
+        const fst::VectorFst<fst::StdArc> *graph;
+        RandomAccessTableReader<fst::VectorFstHolder> fst_reader;
+        if (fst_rspec.compare(0, 4, "ark:") &&
+            fst_rspec.compare(0, 4, "scp:")) {
+
+            graph = fst::VectorFst<fst::StdArc>::Read(fst_rspec);
+        }
+        else {
+            fst_reader.Open(fst_rspec);
+            if (!fst_reader.HasKey(key))
+                KALDI_ERR << "No FST with key '" << key
+                          << "' has been found in '" << fst_rspec << "'";
+            graph = &(fst_reader.Value(key));
+        }
 
         typedef AlignmentDrawer<fst::VectorFst<fst::StdArc> > Drawer;
-        Drawer drawer(graph, trans_model,
+        Drawer drawer(*graph, trans_model,
                       ali, *phones_symtab, *words_symtab,
                       (const char *) "_", show_tids, ali_only);
 
