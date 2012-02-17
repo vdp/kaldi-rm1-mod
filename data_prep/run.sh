@@ -115,6 +115,6 @@ cat test.utt2spk | sort -k 2 | ../scripts/utt2spk_to_spk2utt.pl > test.spk2utt
 cat $RMROOT/rm1_feats/etc/rm1.dic | \
   egrep -v '\(' | \
   sed -e "s/'/\+/g" | \
-  sed -e "s/^\([[:alnum:]-]\+\(+[[:alpha:]]\)\?\)\(.*\)/\1\L\3/g" > lexicon.txt 
+  sed -e "s/^\([[:alnum:]-]\+\(+[[:alpha:]]\+\)\?\)\(.*\)/\1\L\3/g" > lexicon.txt 
 
 echo "--- Done data preparation!"
