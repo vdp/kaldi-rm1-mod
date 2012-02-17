@@ -37,7 +37,7 @@ if [ $# != 1 ]; then
 fi 
 
 RMROOT=$1
-if [ ! -d $RMROOT/LDC93S3B -o ! -d $RMROOT/conf ]; then
+if [ ! -d $RMROOT/LDC93S3B -o ! -d $RMROOT/rm1_feats ]; then
   echo "Check your RM1_ROOT"
   exit 1; 
 fi  
@@ -118,6 +118,6 @@ cat test.utt2spk | sort -k 2 | ../scripts/utt2spk_to_spk2utt.pl > test.spk2utt
 ../scripts/make_rm_lm.pl $RMROOT/LDC93S3B/disc_1/doc/wp_gram.txt  > G.txt 
 
 # Getting lexicon
-../scripts/make_rm_dict.pl  $RMROOT/conf/pcdsril.txt > lexicon.txt
+../scripts/make_rm_dict.pl  $RMROOT/LDC93S3B/disc_1/doc/pcdsril.txt > lexicon.txt
 
 echo "--- Done data preparation!"
