@@ -42,13 +42,6 @@ if [ ! -d $RMROOT/LDC93S3B -o ! -d $RMROOT/conf ]; then
   exit 1; 
 fi  
 
-#orig
-#(
-#  find $RMROOT/rm1_audio1/rm1/ind_trn -iname '*.sph';
-#  find $RMROOT/rm1_audio2/2_4_2/rm1/ind/dev_aug -iname '*.sph';
-#) | perl -ane ' m:/sa\d.sph:i || m:/sb\d\d.sph:i || print; '  > train_sph.flist
-#/orig
-
 # Make a list of files
 cat $RMROOT/rm1_feats/etc/rm1_train.fileids | \
     xargs -I_x_ echo $RMROOT/rm1_feats/feat/_x_.mfc > train.flist
@@ -57,17 +50,17 @@ cat $RMROOT/rm1_feats/etc/rm1_test.fileids | \
 
 # make_trans.pl also creates the utterance id's and the kaldi-format scp file.
 
-# VDP: train
+# train
 ./make_trans.pl trn train.flist $RMROOT/LDC93S3B/disc_1/doc/al_sents.snr train_trans.txt train.scp
 mv train_trans.txt tmp; sort -k 1 tmp > train_trans.txt
 mv train.scp tmp; sort -k 1 tmp > train.scp
 
-# VDP: test
+# test
 ./make_trans.pl test test.flist $RMROOT/LDC93S3B/disc_1/doc/al_sents.snr test_trans.txt test.scp
 mv test_trans.txt tmp; sort -k 1 tmp > test_trans.txt
 mv test.scp tmp; sort -k 1 tmp > test.scp
 
-# VDP: We already have the features, so sph2pipe step isn't needed
+# We already have the features, so sph2pipe step isn't needed
 
 # orig
 #sph2pipe=`cd ../../../..; echo $PWD/tools/sph2pipe_v2.5/sph2pipe`
@@ -78,16 +71,16 @@ mv test.scp tmp; sort -k 1 tmp > test.scp
 #awk '{printf("%s '$sph2pipe' -f wav %s |\n", $1, $2);}' < train_sph.scp > train_wav.scp
 # /orig
 
-#VDP: train
+# train
 cat train.scp | perl -ane 'm/^(\w+_(\w+)\w_\w+) / || die; print "$1 $2\n"' > train.utt2spk
 cat train.utt2spk | sort -k 2 | ../scripts/utt2spk_to_spk2utt.pl > train.spk2utt
 
-#VDP: test
+# test
 cat test.scp | perl -ane 'm/^(\w+_(\w+)\w_\w+) / || die; print "$1 $2\n"' > test.utt2spk
 cat test.utt2spk | sort -k 2 | ../scripts/utt2spk_to_spk2utt.pl > test.spk2utt
 
-# VDP: We only have a small subset of the data, so just one test.flist etc... created 
-# orig
+# We only have a small subset of the data, so just one test.flist etc... created 
+
 #for ntest in 1_mar87 2_oct87 4_feb89 5_oct89 6_feb91 7_sep92; do
 #   n=`echo $ntest | cut -d_ -f 1`
 #   test=`echo $ntest | cut -d_ -f 2`
@@ -118,7 +111,10 @@ cat test.utt2spk | sort -k 2 | ../scripts/utt2spk_to_spk2utt.pl > test.spk2utt
 ../scripts/make_rm_lm.pl $RMROOT/LDC93S3B/disc_1/doc/wp_gram.txt  > G.txt 
 
 # Getting lexicon (leave only the first pronunciation variant,
-# and convert "'" to "+")
-cat $RMROOT/rm1_feats/etc/rm1.dic | egrep -v '\(' | sed -e "s/'/\+/g" > lexicon.txt 
+# convert "'" to "+", and convert the phones to lower case)
+cat $RMROOT/rm1_feats/etc/rm1.dic | \
+  egrep -v '\(' | \
+  sed -e "s/'/\+/g" | \
+  sed -e "s/^\([[:alnum:]-]\+\(+[[:alpha:]]\)\?\)\(.*\)/\1\L\3/g" > lexicon.txt 
 
 echo "--- Done data preparation!"
