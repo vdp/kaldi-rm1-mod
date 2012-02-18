@@ -11,7 +11,9 @@
 ; scripts/make_rm_lm.pl data_prep/wp_toy.txt
 ;
 ; For visualization:
-; scripts/make_rm_lm.pl data_prep/wp_toy.txt | fstcompile --isymbols=data_prep/isyms_toy.txt --osymbols=data_prep/osyms_toy.txt | fstdraw --isymbols=data_prep/isyms_toy.txt  --osymbols=data_prep/osyms_toy.txt --portrait=false | dot -Tpdf > g_toy.pdf
+; scripts/make_rm_lm.pl data_prep/wp_toy.txt > G_toy.txt
+; scripts/make_words_symtab.pl < G_toy.txt > words_toy.txt
+; cat G_toy.txt | fstcompile --isymbols=words_toy.txt --osymbols=words_toy.txt | fstdraw --isymbols=words_toy.txt --osymbols=words_toy.txt --portrait=true | dot -Tpdf > g_toy.pdf
 
 >SENTENCE-END
  FIVE
