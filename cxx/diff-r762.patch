@@ -1,0 +1,1779 @@
+diff --git a/src/bin/Makefile b/src/bin/Makefile
+index e7e2458..3a7bb57 100644
+--- a/src/bin/Makefile
++++ b/src/bin/Makefile
+@@ -3,7 +3,8 @@ all:
+ EXTRA_CXXFLAGS = -Wno-sign-compare
+ include ../kaldi.mk
+ 
+-BINFILES = align-equal align-equal-compiled acc-tree-stats \
++BINFILES = compile-train-graphs-vis draw-tree draw-ali \
++        align-equal align-equal-compiled acc-tree-stats \
+         show-alignments compile-questions cluster-phones \
+         compute-wer make-h-transducer add-self-loops convert-ali \
+         compile-train-graphs compile-train-graphs-fsts \
+diff --git a/src/bin/compile-train-graphs-vis.cc b/src/bin/compile-train-graphs-vis.cc
+new file mode 100644
+index 0000000..0115552
+--- /dev/null
++++ b/src/bin/compile-train-graphs-vis.cc
+@@ -0,0 +1,170 @@
++// bin/compile-train-graphs.cc
++
++// Copyright 2009-2011  Microsoft Corporation
++
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//  http://www.apache.org/licenses/LICENSE-2.0
++//
++// THIS CODE IS PROVIDED *AS IS* BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++// KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION ANY IMPLIED
++// WARRANTIES OR CONDITIONS OF TITLE, FITNESS FOR A PARTICULAR PURPOSE,
++// MERCHANTABLITY OR NON-INFRINGEMENT.
++// See the Apache 2 License for the specific language governing permissions and
++// limitations under the License.
++
++#include "base/kaldi-common.h"
++#include "util/common-utils.h"
++#include "tree/context-dep.h"
++#include "hmm/transition-model.h"
++#include "fstext/fstext-lib.h"
++#include "decoder/training-graph-compiler-vis.h"
++
++
++// This is a trivial modification of compile-train-graphs, to visualize the intermediate
++// cascades(stages) that are needed to produce the final training graph
++int main(int argc, char *argv[]) {
++  try {
++    using namespace kaldi;
++    typedef kaldi::int32 int32;
++    using fst::SymbolTable;
++    using fst::VectorFst;
++    using fst::StdArc;
++
++    const char *usage =
++        "Creates training graphs (without transition-probabilities, by default)\n"
++        "\n"
++        "Usage:   compile-train-graphs [options] tree-in model-in lex-fst-in transcript-rspec transit-wspec "
++        "lg-wspec clg-wspec hclg-noloop-wspec\n"
++        "e.g.: \n"
++        " compile-train-graphs tree 1.mdl lex.fst ark:train.tra ark:graphs.fsts ...\n";
++    ParseOptions po(usage);
++
++    TrainingGraphCompilerVisOptions gopts;
++    int32 batch_size = 250;
++    gopts.transition_scale = 0.0;  // Change the default to 0.0 since we will generally add the
++    // transition probs in the alignment phase (since they change eacm time)
++    gopts.self_loop_scale = 0.0;  // Ditto for self-loop probs.
++    std::string disambig_rxfilename;
++    gopts.Register(&po);
++
++    po.Register("batch-size", &batch_size,
++                "Number of FSTs to compile at a time (more -> faster but uses "
++                "more memory.  E.g. 500");
++    po.Register("read-disambig-syms", &disambig_rxfilename, "File containing "
++                "list of disambiguation symbols in phone symbol table");
++    
++    po.Read(argc, argv);
++
++    if (po.NumArgs() != 8) {
++      po.PrintUsage();
++      exit(1);
++    }
++
++    std::string tree_rxfilename = po.GetArg(1);
++    std::string model_rxfilename = po.GetArg(2);
++    std::string lex_rxfilename = po.GetArg(3);
++    std::string transcript_rspecifier = po.GetArg(4);
++    std::string fsts_wspecifier = po.GetArg(5);
++    std::string lg_wspec = po.GetArg(6);
++    std::string clg_wspec = po.GetArg(7);
++    std::string hclg_noloop_wspec = po.GetArg(8);
++
++    ContextDependency ctx_dep;  // the tree.
++    {
++      bool binary;
++      Input ki(tree_rxfilename, &binary);
++      ctx_dep.Read(ki.Stream(), binary);
++    }
++
++    TransitionModel trans_model;
++    {
++      bool binary;
++      Input ki(model_rxfilename, &binary);
++      trans_model.Read(ki.Stream(), binary);
++      // AmDiagGmm am_gmm;
++      // am_gmm.Read(ki.Stream(), binary);
++    }
++
++    // need VectorFst because we will change it by adding subseq symbol.
++    VectorFst<StdArc> *lex_fst = NULL;  // ownership will be taken by gc.
++    {
++      std::ifstream is(lex_rxfilename.c_str());
++      if (!is.good()) KALDI_ERR << "Could not open lexicon FST " << (std::string)lex_rxfilename;
++      lex_fst =
++          VectorFst<StdArc>::Read(is, fst::FstReadOptions(lex_rxfilename));
++      if (lex_fst == NULL)
++        exit(1);
++    }
++
++    std::vector<int32> disambig_syms;
++    if (disambig_rxfilename != "")
++      if (!ReadIntegerVectorSimple(disambig_rxfilename, &disambig_syms))
++        KALDI_ERR << "fstcomposecontext: Could not read disambiguation symbols from "
++                  << disambig_rxfilename;
++    
++    TrainingGraphCompilerVis gc(trans_model, ctx_dep, lex_fst, disambig_syms, gopts);
++
++    lex_fst = NULL;  // we gave ownership to gc.
++
++    SequentialInt32VectorReader transcript_reader(transcript_rspecifier);
++    TableWriter<fst::VectorFstHolder> fst_writer(fsts_wspecifier);
++    TableWriter<fst::VectorFstHolder> lg_fst_writer(lg_wspec);
++    TableWriter<fst::VectorFstHolder> clg_fst_writer(clg_wspec);
++    TableWriter<fst::VectorFstHolder> hclg_noloop_fst_writer(hclg_noloop_wspec);
++
++    int num_succeed = 0, num_fail = 0;
++
++    if (batch_size == 1) {  // We treat batch_size of 1 as a special case in order
++      // to test more parts of the code.
++      for (; !transcript_reader.Done(); transcript_reader.Next()) {
++        std::string key = transcript_reader.Key();
++        const std::vector<int32> &transcript = transcript_reader.Value();
++        VectorFst<StdArc> decode_fst, lg_fst, clg_fst, hclg_noloop_fst;
++
++        if (!gc.CompileGraphFromText(transcript, &decode_fst,
++                                     &lg_fst, &clg_fst, &hclg_noloop_fst)) {
++          KALDI_WARN << "Problem creating decoding graph for utterance "
++                     << key << " [serious error]";
++          decode_fst.DeleteStates();  // Just make it empty.
++        }
++        if (decode_fst.Start() != fst::kNoStateId) num_succeed++;
++        else num_fail++;
++        fst_writer.Write(key, decode_fst);
++        lg_fst_writer.Write(key, lg_fst);
++        clg_fst_writer.Write(key, clg_fst);
++        hclg_noloop_fst_writer.Write(key, hclg_noloop_fst);
++      }
++    } else {
++      std::vector<std::string> keys;
++      std::vector<std::vector<int32> > transcripts;
++      while (!transcript_reader.Done()) {
++        keys.clear();
++        transcripts.clear();
++        for (; !transcript_reader.Done() &&
++                static_cast<int32>(transcripts.size()) < batch_size;
++            transcript_reader.Next()) {
++          keys.push_back(transcript_reader.Key());
++          transcripts.push_back(transcript_reader.Value());
++        }
++        std::vector<fst::VectorFst<fst::StdArc>* > fsts;
++        if (!gc.CompileGraphsFromText(transcripts, &fsts)) {
++          KALDI_ERR << "Not expecting CompileGraphs to fail.";
++        }
++        assert(fsts.size() == keys.size());
++        for (size_t i = 0; i < fsts.size(); i++)
++          fst_writer.Write(keys[i], *(fsts[i]));
++        num_succeed += fsts.size();
++        DeletePointers(&fsts);
++      }
++    }
++    KALDI_LOG << "compile-train-graphs: succeeded for " << num_succeed
++              << " graphs, failed for " << num_fail;
++    return 0;
++  } catch(const std::exception& e) {
++    std::cerr << e.what();
++    return -1;
++  }
++}
+diff --git a/src/bin/draw-ali.cc b/src/bin/draw-ali.cc
+new file mode 100644
+index 0000000..aff2862
+--- /dev/null
++++ b/src/bin/draw-ali.cc
+@@ -0,0 +1,411 @@
++// bin/draw-ali.cc
++
++// Copyright 2012  Vassil Panayotov <vd.panayotov@gmail.com>
++
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//  http://www.apache.org/licenses/LICENSE-2.0
++//
++// THIS CODE IS PROVIDED *AS IS* BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++// KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION ANY IMPLIED
++// WARRANTIES OR CONDITIONS OF TITLE, FITNESS FOR A PARTICULAR PURPOSE,
++// MERCHANTABLITY OR NON-INFRINGEMENT.
++// See the Apache 2 License for the specific language governing permissions and
++// limitations under the License.
++
++#include "base/kaldi-common.h"
++#include "hmm/transition-model.h"
++#include "hmm/hmm-utils.h"
++#include "util/common-utils.h"
++#include "fst/fstlib.h"
++
++#include <tr1/unordered_set>
++#include <tr1/unordered_map>
++
++namespace kaldi {
++
++template<class F> class AlignmentDrawer
++{
++public:
++    typedef F Fst;
++    typedef typename Fst::Arc Arc;
++    typedef typename Arc::StateId StateId;
++    typedef typename Arc::Label Label;
++    typedef typename Arc::Weight Weight;
++    typedef typename fst::ArcIterator<Fst> ArcIterator;
++    typedef std::vector<kaldi::int32> Alignment;
++    typedef std::pair<StateId, size_t> FstTracePoint;
++    typedef std::vector<FstTracePoint> FstTrace;
++    typedef std::tr1::unordered_set<size_t> TraceArcs;
++    typedef std::tr1::unordered_map<StateId, TraceArcs> TraceMap;
++
++    static const std::string kAliColor;
++    static const std::string kNonAliColor;
++    static const int kEpsLabel = 0;
++
++    AlignmentDrawer(const Fst &fst, TransitionModel &tmodel,
++                    const std::vector<kaldi::int32> &ali,
++                    fst::SymbolTable &phone_syms,
++                    fst::SymbolTable &word_syms,
++                    const char *sep, bool show_tids, bool ali_only):
++        fst_(fst), tmodel_(tmodel), ali_(ali), phone_syms_(phone_syms),
++        word_syms_(word_syms), sep_(sep),
++        show_tids_(show_tids), ali_only_(ali_only) {}
++
++
++    void Draw()
++    {
++        using namespace std;
++        bool found = FindTrace();
++        if (!found) {
++            KALDI_WARN << "No alignment has been found!";
++            return;
++        }
++
++        // DOT header
++        cout << "digraph FST {\n"
++                "rankdir = LR;\n"
++                "size = \"8.5,11\";\n"
++                "label = \"\";\n"
++                "center = 1;\n"
++                "orientation = Portrait;\n"
++                "ranksep = \"0.4\";\n"
++                "nodesep = \"0.25\";\n";
++
++        DrawTrace();
++        if (!ali_only_)
++            DrawRest();
++
++        // DOT footer
++        cout << "}\n";
++    }
++
++private:
++
++    void DrawRest() {
++        fst::StateIterator<Fst> sti(fst_);
++        for (; !sti.Done(); sti.Next()) {
++            StateId state = sti.Value();
++            typename TraceMap::iterator tmi = trace_map_.find(state);
++            bool state_traced = (tmi != trace_map_.end());
++            if (!state_traced)
++                DrawState(state, kNonAliColor);
++            ArcIterator ai(fst_, state);
++            for (; !ai.Done(); ai.Next()) {
++                if (!state_traced)
++                    DrawArc(state, ai.Value(), 1, kNonAliColor);
++                else if (tmi->second.find(ai.Position()) == tmi->second.end())
++                    DrawArc(state, ai.Value(), 1, kNonAliColor);
++            }
++        }
++    }
++
++    /// Creates a map: state -> all out arcs which belong to the alignment trace
++    void UpdateTraceMap(StateId &state, size_t arc) {
++        typename TraceMap::iterator tmi = trace_map_.find(state);
++        if (tmi == trace_map_.end()) {
++            // This is the first time we visit this state - init its arc set
++            TraceArcs arcs;
++            arcs.insert(arc);
++            trace_map_.insert(std::make_pair(state, arcs));
++        }
++        else {
++            tmi->second.insert(arc);
++        }
++    }
++
++    void DrawState(StateId state, const std::string &color) {
++        using namespace std;
++
++        string node_style = "solid";
++        string node_shape = "circle";
++        if (state == fst_.Start())
++            node_style = "bold";
++        if (fst_.Final(state) != Weight::Zero())
++            node_shape = "doublecircle";
++        ostringstream label;
++        label << state;
++        if (fst_.Final(state) != Weight::Zero())
++            label << " / " << fst_.Final(state);
++
++        cout << state << " [label = \"" << label.str() << "\", shape = " << node_shape;
++        cout << ", style = " << node_style << ", color = " << color << "];\n";
++    }
++
++    std::string MakeLabel(const Arc &arc, int count)
++    {
++        std::ostringstream oss;
++
++        if(count > 1)
++            oss << '(' << count << "x)";
++
++        kaldi::int32 tid = arc.ilabel;
++        kaldi::int32 phnid = 0;
++        if (tid != 0) {
++            phnid = tmodel_.TransitionIdToPhone(tid);
++            oss << phone_syms_.Find(static_cast<kaldi::int64>(phnid));
++            oss << sep_ << tmodel_.TransitionIdToHmmState(tid);
++            oss << sep_ << tmodel_.TransitionIdToPdf(tid);
++            oss << sep_ << tmodel_.TransitionIdToTransitionIndex(tid);
++        }
++        else {
++            // the input symbol is <eps>
++            oss << phone_syms_.Find(static_cast<kaldi::int64>(phnid));
++        }
++        if (show_tids_)
++            oss << '[' << tid << ']';
++        oss << ':' << word_syms_.Find(static_cast<kaldi::int64>(arc.olabel));
++        if (arc.weight != Weight::One())
++            oss << '/' << arc.weight;
++
++        return oss.str();
++    }
++
++    void DrawArc(const StateId &state, const Arc &arc,
++                 const int count, const std::string &color) {
++        using namespace std;
++
++        cout << "\t" << state << " -> " << arc.nextstate;
++        cout << " [ label = \"" << MakeLabel(arc, count) << "\", ";
++        cout << "color = " << color << ", fontcolor = " << color;
++        cout << "];\n";
++    }
++
++    void DrawTrace() {
++        int t;
++        for (t = 0; t < fst_trace_.size();) {
++            StateId state = fst_trace_[t].first;
++            size_t arc_pos = fst_trace_[t].second;
++            ArcIterator ait(fst_, state);
++            ait.Seek(arc_pos);
++            const Arc &arc = ait.Value();
++            int count = 1;
++            while (++t < fst_trace_.size() &&
++                   fst_trace_[t].first == state &&
++                   fst_trace_[t].second == arc_pos)
++                ++ count;
++
++            typename TraceMap::const_iterator tmi = trace_map_.find(state);
++            if (tmi == trace_map_.end())
++                // This is the first time we reach this state - draw it
++                DrawState(state, kAliColor);
++
++            DrawArc(state, arc, count, kAliColor);
++            UpdateTraceMap(state, arc_pos);
++        }
++    }
++
++    // Describes a particular state of the alignment-matching process
++    struct AliHypothesys {
++        AliHypothesys(StateId state, size_t arc,
++                      size_t ali_idx, size_t fst_ali_len):
++            state(state), arc(arc),
++            ali_idx(ali_idx), fst_ali_len(fst_ali_len) {}
++
++        StateId state; // state ID
++        size_t arc;  // the index of an outgoing arc of "state"
++        size_t ali_idx; // points to the trans-id to be matched by state/arc
++        size_t fst_ali_len; // the length of the fst state/arc sequence that agrees with
++                            // state-id subsequence from 0 to ali_idx inclusive
++    };
++
++    template <typename S>
++    struct VisitedHash {
++        size_t operator() (const std::pair<S, size_t> &entry) const {
++            return (entry.first << 16) + entry.second;
++        }
++    };
++
++    template <typename S>
++    struct VisitedEqual {
++        bool operator() (const std::pair<S, size_t> &a,
++                         const std::pair<S, size_t> &b) const {
++            return (a.first == b.first && a.second == b.second);
++        }
++    };
++
++    bool FindTrace()
++    {
++        fst_trace_.clear();
++        std::vector<AliHypothesys> hypotheses;
++
++        // <state, alignment_prefix> to avoid e.g. <eps> loops
++        std::tr1::unordered_set<
++                std::pair<StateId, size_t>,
++                VisitedHash<StateId>, VisitedEqual<StateId> > visited;
++
++        StateId start = fst_.Start();
++        if (start == fst::kNoStateId)
++            return false;
++
++        // Init the hypotheses queue
++        size_t ali_idx = 0;
++        size_t fst_ali_len = 0;
++        for (ArcIterator aiter(fst_, start); !aiter.Done(); aiter.Next()) {
++            const Arc &arc = aiter.Value();
++            if (arc.ilabel == kEpsLabel || arc.ilabel == ali_[ali_idx]) {
++                hypotheses.push_back(
++                            AliHypothesys(start, aiter.Position(),
++                                          ali_idx, fst_ali_len));
++            }
++        }
++        visited.insert(std::make_pair(start, ali_idx));
++
++        // Test and extend/backtrack alignments as needed
++        while (!hypotheses.empty()) {
++            AliHypothesys hyp = hypotheses.back();
++            hypotheses.pop_back();
++
++            ali_idx = hyp.ali_idx;
++            ArcIterator ait(fst_, hyp.state);
++            ait.Seek(hyp.arc);
++            const Arc &arc = ait.Value();
++            KALDI_ASSERT(arc.ilabel == kEpsLabel ||
++                         arc.ilabel == ali_[ali_idx]);
++            if (arc.ilabel != kEpsLabel)
++                ++ ali_idx;
++
++            if (hyp.fst_ali_len < fst_trace_.size()) {
++                //backtrack
++                typename FstTrace::iterator ftit = fst_trace_.begin() + hyp.fst_ali_len;
++                fst_trace_.erase(ftit, fst_trace_.end());
++            }
++            fst_trace_.push_back(std::make_pair(hyp.state, hyp.arc));
++
++            StateId nextstate = arc.nextstate;
++            if (ali_idx == ali_.size() && fst_.Final(nextstate) != Weight::Zero())
++                return true;
++
++            if (visited.find(std::make_pair(nextstate, ali_idx))
++                    != visited.end())
++                continue; // this state/alignment pair was already considered
++
++            // Extend the current hypothesis
++            visited.insert(std::make_pair(nextstate, ali_idx));
++            ArcIterator nait(fst_, nextstate);
++            for (; !nait.Done(); nait.Next()) {
++                const Arc &narc = nait.Value();
++                if (narc.ilabel == kEpsLabel || narc.ilabel == ali_[ali_idx])
++                    hypotheses.push_back(AliHypothesys(nextstate, nait.Position(),
++                                                       ali_idx, fst_trace_.size()));
++            }
++        }
++
++        return false; // no alignment has been found
++    }
++
++    FstTrace fst_trace_;
++
++    // A map from a state that belongs to the alignment trace
++    // to its output arcs that belong to the trace
++    TraceMap trace_map_;
++
++    const Fst &fst_;
++    const TransitionModel &tmodel_;
++    const Alignment &ali_;
++    const fst::SymbolTable &phone_syms_;
++    const fst::SymbolTable &word_syms_;
++    const std::string sep_;
++    const bool show_tids_;
++    const bool ali_only_;
++};
++
++template<typename F> const std::string AlignmentDrawer<F>::kAliColor = "red";
++template<typename F> const std::string AlignmentDrawer<F>::kNonAliColor = "black";
++
++} // namespace kaldi
++
++int main(int argc, char *argv[])
++{
++    using namespace kaldi;
++
++    try {
++        std::string key = "";
++        bool show_tids = false;
++        bool ali_only = false;
++
++        const char *usage = "Visualizes an alignment using GraphViz DOT language\n"
++                "Usage: draw-ali [options] <phone-syms> <word-syms> <model> <ali-rspec> <fst-rspec>\n\n";
++        ParseOptions po(usage);
++        po.Register("key", &key, "The key of the alignment/fst we want to render(mandatory!)");
++        po.Register("show-tids", &show_tids, "Also shows the transition-ids");
++        po.Register("ali-only", &ali_only, "Draw only the states/arcs in the alignment");
++        po.Read(argc, argv);
++        if (po.NumArgs() != 5 || key == "") {
++            po.PrintUsage();
++            exit(1);
++        }
++
++        std::string phn_file = po.GetArg(1);
++        std::string wrd_file = po.GetArg(2);
++        std::string mdl_file = po.GetArg(3);
++        std::string ali_rspec = po.GetArg(4);
++        std::string fst_rspec = po.GetArg(5);
++
++        RandomAccessTableReader<BasicVectorHolder<kaldi::int32> > ali_reader(ali_rspec);
++
++        fst::SymbolTable *phones_symtab = NULL;
++        {
++            std::ifstream is(phn_file.c_str());
++            phones_symtab = ::fst::SymbolTable::ReadText(is, phn_file);
++            if (!phones_symtab)
++                KALDI_ERR << "Could not read phones symbol-table file "<< phn_file;
++        }
++
++        fst::SymbolTable *words_symtab = NULL;
++        {
++            std::ifstream is(wrd_file.c_str());
++            words_symtab = ::fst::SymbolTable::ReadText(is, wrd_file);
++            if (!words_symtab)
++                KALDI_ERR << "Could not read words symbol-table file "<< wrd_file;
++        }
++
++        TransitionModel trans_model;
++        {
++            bool binary;
++            Input ki(mdl_file, &binary);
++            trans_model.Read(ki.Stream(), binary);
++        }
++
++        if (!ali_reader.HasKey(key)) {
++            KALDI_ERR << "No alignment with key '" << key
++                      << "' has been found in '" << ali_rspec << "'";
++            exit(1);
++        }
++
++        const std::vector<kaldi::int32> &ali = ali_reader.Value(key);
++
++        const fst::VectorFst<fst::StdArc> *graph;
++        RandomAccessTableReader<fst::VectorFstHolder> fst_reader;
++        if (fst_rspec.compare(0, 4, "ark:") &&
++            fst_rspec.compare(0, 4, "scp:")) {
++
++            graph = fst::VectorFst<fst::StdArc>::Read(fst_rspec);
++        }
++        else {
++            fst_reader.Open(fst_rspec);
++            if (!fst_reader.HasKey(key))
++                KALDI_ERR << "No FST with key '" << key
++                          << "' has been found in '" << fst_rspec << "'";
++            graph = &(fst_reader.Value(key));
++        }
++
++        typedef AlignmentDrawer<fst::VectorFst<fst::StdArc> > Drawer;
++        Drawer drawer(*graph, trans_model,
++                      ali, *phones_symtab, *words_symtab,
++                      (const char *) "_", show_tids, ali_only);
++
++        drawer.Draw();
++
++        delete phones_symtab;
++        delete words_symtab;
++    }
++    catch (std::exception& e) {
++        KALDI_ERR << e.what();
++        return -1;
++    }
++
++    return 0;
++}
+diff --git a/src/bin/draw-tree.cc b/src/bin/draw-tree.cc
+new file mode 100644
+index 0000000..4718c9c
+--- /dev/null
++++ b/src/bin/draw-tree.cc
+@@ -0,0 +1,374 @@
++// bin/draw-tree.cc
++
++// Copyright 2012  Vassil Panayotov <vd.panayotov@gmail.com>
++
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//  http://www.apache.org/licenses/LICENSE-2.0
++//
++// THIS CODE IS PROVIDED *AS IS* BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++// KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION ANY IMPLIED
++// WARRANTIES OR CONDITIONS OF TITLE, FITNESS FOR A PARTICULAR PURPOSE,
++// MERCHANTABLITY OR NON-INFRINGEMENT.
++// See the Apache 2 License for the specific language governing permissions and
++// limitations under the License.
++
++#include "base/kaldi-common.h"
++#include "util/common-utils.h"
++#include "hmm/transition-model.h"
++#include "fst/fstlib.h"
++
++namespace kaldi {
++
++/// Traverses the event map tree depth-first and spits out its GraphViz description
++class TreeRenderer: public EventMapVisitor
++{
++public:
++    TreeRenderer(EventMap &root, const fst::SymbolTable *phone_syms,
++                 kaldi::int32 N, kaldi::int32 P) :
++        kColor_("black"), kTraceColor_("red"), kPen_(1), kTracePen_(3),
++        root_(root), N(N), P(P), phone_syms_(phone_syms),
++        next_id_(0), parent_id_(0)
++    {
++        KALDI_ASSERT(((N == 3 && P == 1) || (N == 1 && P == 0)) &&
++                     "Unsupported context window!");
++    }
++
++    void Render(const EventType *event = 0) {
++        event_ = event;
++        if (event != 0)
++            path_active_ = true;
++        else
++            path_active_ = false;
++
++        std::cout << "digraph EventMap {" << std::endl;
++        root_.Accept(*this);
++        std::cout << '}' << std::endl;
++    }
++
++    virtual void VisitSplit(EventKeyType &key,
++                            ConstIntegerSet<EventValueType> &yes_set,
++                            EventMap *yes_map,
++                            EventMap *no_map)
++    {
++        kaldi::int32 my_id = next_id_ ++;
++
++        // Draw this node and the input edge from its parent
++        DrawThisNode(my_id, key);
++
++        // Descend into this node's children
++        std::string yes_color(kColor_), no_color(kColor_);
++        kaldi::int32 yes_pen = kPen_, no_pen = kPen_;
++        bool yes_active = false;
++        bool active = path_active_;
++        if (event_ != 0 && path_active_) {
++            EventValueType value;
++            EventMap::Lookup(*event_, key, &value);
++            if (yes_set.count(value)) {
++                yes_color = kTraceColor_;
++                yes_active = true;
++                yes_pen = kTracePen_;
++            } else {
++                no_color = kTraceColor_;
++                no_pen = kTracePen_;
++            }
++        }
++
++        // "Yes" child
++        std::string yes_tooltip = MakeYesTooltip(key, yes_set);
++        path_active_ = (active && yes_active);
++        parent_id_ = my_id;
++        std::ostringstream oss_yes;
++        oss_yes << "[color=" << yes_color
++                << ", label=\"" << yes_tooltip << '\"'
++                << ", penwidth=" << yes_pen
++                << "];";
++        edge_attr_ = oss_yes.str();
++        yes_map->Accept(*this);
++
++        // "No" child
++        path_active_ = (active && !yes_active);
++        parent_id_ = my_id;
++        std::ostringstream oss_no;
++        oss_no << "[color=" << no_color
++               << ", penwidth=" << no_pen << "];";
++        edge_attr_ = oss_no.str();
++        no_map->Accept(*this);
++    }
++
++    virtual void VisitConst(const EventAnswerType &answer)
++    {
++        std::ostringstream oss;
++
++        kaldi::int32 id = next_id_++;
++
++        // Draw the edge from parent
++        if (parent_id_ >= 0 && id > 0)
++            oss << '\t' << parent_id_ << " -> " << id <<
++                   edge_attr_ << std::endl;
++
++        std::string color = kColor_;
++        kaldi::int32 pen = kPen_;
++        if (path_active_) {
++            pen = kTracePen_;
++            color = kTraceColor_;
++        }
++
++        // Draw a leaf node
++        oss << id << "[shape=\"doublecircle\", label=" << answer
++            << ",color=" << color << ", penwidth=" << pen << "];";
++        std::cout << oss.str() << std::endl;
++    }
++
++    virtual void VisitTable(const EventKeyType &key, std::vector<EventMap*> &table)
++    {
++        kaldi::int32 my_id = next_id_ ++;
++
++        // Draw the node and the input edge from its parent
++        DrawThisNode(my_id, key);
++
++        // Descend into the event maps stored in table's entries
++        bool active = path_active_;
++        EventValueType value = -1;
++        if (event_)
++            EventMap::Lookup(*event_, key, &value);
++        for (int i = 0; i < table.size(); i++) {
++            if (table[i] == NULL)
++                continue;
++
++            std::ostringstream label;
++            if (key == kPdfClass) {
++                label << i;
++            }
++            else if (key < N) {
++                std::string phone = phone_syms_->Find(
++                            static_cast<kaldi::int64>(i));
++                if (phone.empty()) {
++                    KALDI_ERR << "Invalid phone key!";
++                }
++                label << phone;
++            }
++            else {
++                KALDI_ERR << "Invalid event key!";
++            }
++
++            path_active_ = false;
++            parent_id_ = my_id;
++            std::string color(kColor_);
++            kaldi::int32 pen = kPen_;
++            if (i == value && active) {
++                color = kTraceColor_;
++                path_active_ = true;
++                pen = kTracePen_;
++            }
++            std::ostringstream oss;
++            oss << "[color=" << color
++                << ", label=" << label.str()
++                << ", penwidth=" << pen << "];";
++            edge_attr_ = oss.str();
++            table[i]->Accept(*this);
++        }
++    }
++
++private:
++
++    void DrawThisNode(kaldi::int32 my_id, const EventKeyType &key)
++    {
++        std::ostringstream out;
++        std::string color = kColor_;
++        kaldi::int32 pen = kPen_;
++        if (path_active_ && event_) {
++            color = kTraceColor_;
++            pen = kTracePen_;
++        }
++
++        // Draw the incomming edge from this node's parent
++        if (my_id > 0) // don't draw self-loop at the root
++            out << '\t' <<  parent_id_ << " -> " << my_id << edge_attr_ << std::endl;
++
++        // Draw the node itself
++        std::string label;
++        if (key == kPdfClass) {
++            label = "\"HMM state = ?\"";
++        }
++        else if (key == 0) {
++            if (N == 1)
++                label = "\"Phone = ?\"";
++            else
++                label = "\"LContext = ?\"";
++        }
++        else if (key == 1 && key < N) {
++            label = "\"Center = ?\"";
++        }
++        else if (key == 2 && key < N) {
++            label = "\"RContext = ?\"";
++        }
++        else {
++            KALDI_ERR << "Unexpected key: " << key;
++        }
++        out << my_id << " [label=" << label
++            << ", color=" << color
++            << ", penwidth=" << pen << "];";
++        std::cout << out.str() << std::endl;
++    }
++
++    std::string MakeYesTooltip(EventKeyType key,
++                               const ConstIntegerSet<EventValueType> &yes_set)
++    {
++        std::ostringstream oss;
++        //oss << '\"';
++        ConstIntegerSet<EventValueType>::iterator child = yes_set.begin();
++        for (; child != yes_set.end(); child ++) {
++            if (child != yes_set.begin())
++                oss << ", ";
++            if (key != kPdfClass) {
++                std::string phone =
++                        phone_syms_->Find(static_cast<kaldi::int64>(*child));
++                if (phone.empty())
++                    KALDI_ERR << "No phone found for Phone ID " << *child;
++                oss << phone;
++            }
++            else {
++                oss << *child;
++            }
++        }
++        //oss << '\"';
++        return oss.str();
++    }
++
++    const std::string kColor_;
++    const std::string kTraceColor_;
++    const kaldi::int32 kPen_;
++    const kaldi::int32 kTracePen_; // GraphViz pen width for the "traced" path
++
++    EventMap &root_; // the root of the tree
++    const kaldi::int32 N; // context length
++    const kaldi::int32 P; // central phone
++    const EventType *event_; // the 'event' to be traced (0 means "don't trace")
++    const fst::SymbolTable *phone_syms_;
++
++    kaldi::int32 next_id_; // The next node id to be assigned
++    kaldi::int32 parent_id_; // The id of the current node's parent
++    std::string edge_attr_; // The attributes of the edge to current node from its parent
++    bool path_active_; // True if the current node is traversed when tracing an event through the tree
++}; // TreeRenderer
++
++} // namespace kaldi
++
++kaldi::EventType* MakeEvent(std::string &query,
++                            kaldi::int32 N,
++                            fst::SymbolTable *phone_syms,
++                            kaldi::ParseOptions &po)
++{
++    using namespace kaldi;
++
++    EventType *query_event = new EventType();
++    size_t found, old_found = 0;
++    EventKeyType key = -1;
++    while ((found = query.find('/', old_found)) != std::string::npos) {
++        std::string valstr = query.substr(old_found, found - old_found);
++        EventValueType value;
++        if (key == -1) {
++            value = static_cast<EventValueType>(atoi(valstr.c_str()));
++            if (value < 0 || value > 2) { // not valid 3-phone state
++                std::cerr << "Bad query: invalid HMM state index ("
++                          << valstr << ')' << std::endl << std::endl;
++                return 0;
++            }
++        }
++        else {
++            value = static_cast<EventValueType>(phone_syms->Find(valstr.c_str()));
++            if (value == fst::SymbolTable::kNoSymbol) {
++                std::cerr << "Bad query: invalid symbol ("
++                          << valstr << ')' << std::endl << std::endl;
++                return 0;
++            }
++        }
++        query_event->push_back(std::make_pair(key++, value));
++        old_found = found + 1;
++    }
++    if ((N == 3 && query_event->size() != 3) ||
++        (N == 1 && query_event->size() != 1)) {
++        std::cerr << "Invalid query: " << query << std::endl;
++        return 0;
++    }
++    std::string valstr = query.substr(old_found);
++    EventValueType value = static_cast<EventValueType>(phone_syms->Find(valstr.c_str()));
++    if (value == fst::SymbolTable::kNoSymbol) {
++        std::cerr << "Bad query: invalid symbol ("
++                  << valstr << ')' << std::endl << std::endl;
++        return 0;
++    }
++    query_event->push_back(std::make_pair(key, value));
++
++    return query_event;
++}
++
++int main(int argc, char **argv)
++{
++    using namespace kaldi;
++    try {
++        const char *usage =
++                "Draws a phonetic states-tying tree using GraphViz\n"
++                "The output is meant to be rendered in SVG (to see the tooltips)\n"
++                "Usage: draw-tree [options] <phones-syms> <tree>\n\n";
++
++        std::string query;
++        ParseOptions po(usage);
++        po.Register("query", &query, "Traces a mono/tri phone state through the tree(format: state/lc/c/rc)");
++        po.Read(argc, argv);
++
++        if (po.NumArgs() != 2) {
++            po.PrintUsage();
++            return 1;
++        }
++
++        std::string phnfile = po.GetArg(1);
++        std::string treefile = po.GetArg(2);
++
++        fst::SymbolTable *phones_symtab = NULL;
++        {
++            std::ifstream is(phnfile.c_str());
++            phones_symtab = ::fst::SymbolTable::ReadText(is, phnfile);
++            if (!phones_symtab)
++                KALDI_ERR << "Could not read phones symbol table file "<< phnfile;
++        }
++
++        ContextDependency ctx_dep;  // the tree.
++        {
++          bool binary;
++          Input ki(treefile, &binary);
++          ctx_dep.Read(ki.Stream(), binary);
++        }
++        EventMap &root = const_cast<EventMap&>(ctx_dep.ToPdfMap());
++        const kaldi::int32 P = ctx_dep.CentralPosition();
++        const kaldi::int32 N = ctx_dep.ContextWidth();
++
++        if (!((N == 3 && P == 1) || (N == 1 && P == 0))) {
++            std::cerr << "Only monophone and triphone trees are supported\n";
++            po.PrintUsage();
++            return 1;
++        }
++
++        EventType *query_event = 0;
++        if (!query.empty()) {
++            query_event = MakeEvent(query, N, phones_symtab, po);
++            if (query_event == 0) {
++                po.PrintUsage();
++                return 2;
++            }
++        }
++
++        TreeRenderer renderer(root, phones_symtab, N, P);
++        renderer.Render(query_event);
++
++        return 0;
++    }
++    catch (std::exception& e) {
++        KALDI_ERR << e.what();
++    }
++
++    return 0;
++}
+diff --git a/src/decoder/Makefile b/src/decoder/Makefile
+index 36d0744..a08e5da 100644
+--- a/src/decoder/Makefile
++++ b/src/decoder/Makefile
+@@ -8,7 +8,7 @@ include ../kaldi.mk
+ #TESTFILES =  kaldi-decoder-test
+ TESTFILES = 
+ 
+-OBJFILES = decodable-am-diag-gmm.o training-graph-compiler.o decodable-am-sgmm.o decodable-am-tied-diag-gmm.o decodable-am-tied-full-gmm.o
++OBJFILES = training-graph-compiler-vis.o decodable-am-diag-gmm.o training-graph-compiler.o decodable-am-sgmm.o decodable-am-tied-diag-gmm.o decodable-am-tied-full-gmm.o
+ 
+ LIBFILE = kaldi-decoder.a
+ 
+diff --git a/src/decoder/training-graph-compiler-vis.cc b/src/decoder/training-graph-compiler-vis.cc
+new file mode 100644
+index 0000000..77cc605
+--- /dev/null
++++ b/src/decoder/training-graph-compiler-vis.cc
+@@ -0,0 +1,259 @@
++// decoder/training-graph-compiler.cc
++// Copyright 2009-2011 Microsoft Corporation
++
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++
++//  http://www.apache.org/licenses/LICENSE-2.0
++
++// THIS CODE IS PROVIDED *AS IS* BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++// KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION ANY IMPLIED
++// WARRANTIES OR CONDITIONS OF TITLE, FITNESS FOR A PARTICULAR PURPOSE,
++// MERCHANTABLITY OR NON-INFRINGEMENT.
++// See the Apache 2 License for the specific language governing permissions and
++// limitations under the License.
++
++#include "decoder/training-graph-compiler-vis.h"
++#include "hmm/hmm-utils.h" // for GetHTransducer
++
++namespace kaldi {
++
++
++TrainingGraphCompilerVis::TrainingGraphCompilerVis(const TransitionModel &trans_model,
++                                             const ContextDependency &ctx_dep,  // Does not maintain reference to this.
++                                             fst::VectorFst<fst::StdArc> *lex_fst,
++                                             const std::vector<int32> &disambig_syms,
++                                             const TrainingGraphCompilerVisOptions &opts):
++    trans_model_(trans_model), ctx_dep_(ctx_dep), lex_fst_(lex_fst),
++    disambig_syms_(disambig_syms), opts_(opts) {
++  using namespace fst;
++  const std::vector<int32> &phone_syms = trans_model_.GetPhones();  // needed to create context fst.
++
++  assert(!phone_syms.empty());
++  assert(IsSortedAndUniq(phone_syms));
++  SortAndUniq(&disambig_syms_);
++  for (int32 i = 0; i < disambig_syms_.size(); i++)
++    if (std::binary_search(phone_syms.begin(), phone_syms.end(),
++                           disambig_syms_[i]))
++      KALDI_ERR << "Disambiguation symbol " << disambig_syms_[i]
++                << " is also a phone.";
++  
++  int32 subseq_symbol = 1 + phone_syms.back();
++  if (!disambig_syms_.empty() && subseq_symbol <= disambig_syms_.back())
++    subseq_symbol = 1 + disambig_syms_.back();
++
++  {
++    int32 N = ctx_dep.ContextWidth(),
++        P = ctx_dep.CentralPosition();
++    if (P != N-1)
++      AddSubsequentialLoop(subseq_symbol, lex_fst_);  // This is needed for
++    // systems with right-context or we will not successfully compose
++    // with C.
++  }
++
++  {  // make sure lexicon is olabel sorted.
++    fst::OLabelCompare<fst::StdArc> olabel_comp;
++    fst::ArcSort(lex_fst_, olabel_comp);
++  }
++}
++
++bool TrainingGraphCompilerVis::CompileGraphFromText(
++    const std::vector<int32> &transcript,
++    fst::VectorFst<fst::StdArc> *out_fst,
++    fst::VectorFst<fst::StdArc> *lg_fst,
++    fst::VectorFst<fst::StdArc> *clg_fst,
++    fst::VectorFst<fst::StdArc> *hclg_noloop_fst) {
++  using namespace fst;
++  VectorFst<StdArc> word_fst;
++  MakeLinearAcceptor(transcript, &word_fst);
++  return CompileGraph(word_fst, out_fst, lg_fst, clg_fst, hclg_noloop_fst);
++}
++
++bool TrainingGraphCompilerVis::CompileGraph(const fst::VectorFst<fst::StdArc> &word_fst,
++                                         fst::VectorFst<fst::StdArc> *out_fst,
++                                         fst::VectorFst<fst::StdArc> *lg_fst,
++                                         fst::VectorFst<fst::StdArc> *clg_fst,
++                                         fst::VectorFst<fst::StdArc> *hclg_noloop_fst) {
++  using namespace fst;
++  assert(lex_fst_ !=NULL);
++  assert(out_fst != NULL);
++
++  VectorFst<StdArc> &phone2word_fst = *lg_fst;
++  // TableCompose more efficient than compose.
++  TableCompose(*lex_fst_, word_fst, &phone2word_fst, &lex_cache_);
++
++  assert(phone2word_fst.Start() != kNoStateId);
++
++  ContextFst<StdArc> *cfst = NULL;
++  {  // make cfst [ it's expanded on the fly ]
++    const std::vector<int32> &phone_syms = trans_model_.GetPhones();  // needed to create context fst.
++    int32 subseq_symbol = phone_syms.back() + 1;
++    if (!disambig_syms_.empty() && subseq_symbol <= disambig_syms_.back())
++      subseq_symbol = 1 + disambig_syms_.back();
++
++    cfst = new ContextFst<StdArc>(subseq_symbol,
++                                  phone_syms,
++                                  disambig_syms_,
++                                  ctx_dep_.ContextWidth(),
++                                  ctx_dep_.CentralPosition());
++  }
++
++  VectorFst<StdArc> &ctx2word_fst = *clg_fst;
++  ComposeContextFst(*cfst, phone2word_fst, &ctx2word_fst);
++  // ComposeContextFst is like Compose but faster for this particular Fst type.
++  // [and doesn't expand too many arcs in the ContextFst.]
++
++  assert(ctx2word_fst.Start() != kNoStateId);
++
++  HTransducerConfig h_cfg;
++  h_cfg.transition_scale = opts_.transition_scale;
++
++  std::vector<int32> disambig_syms_h; // disambiguation symbols on
++  // input side of H.
++  VectorFst<StdArc> *H = GetHTransducer(cfst->ILabelInfo(),
++                                        ctx_dep_,
++                                        trans_model_,
++                                        h_cfg,
++                                        &disambig_syms_h);
++
++  VectorFst<StdArc> &trans2word_fst = *out_fst;  // transition-id to word.
++  TableCompose(*H, ctx2word_fst, &trans2word_fst);
++  
++  assert(trans2word_fst.Start() != kNoStateId);
++
++  *hclg_noloop_fst = *out_fst;
++
++  // Epsilon-removal and determinization combined. This will fail if not determinizable.
++  DeterminizeStarInLog(&trans2word_fst);
++
++  if (!disambig_syms_h.empty()) {
++    RemoveSomeInputSymbols(disambig_syms_h, &trans2word_fst);
++    // we elect not to remove epsilons after this phase, as it is
++    // a little slow.
++    if (opts_.rm_eps)
++      RemoveEpsLocal(&trans2word_fst);
++  }
++
++  
++  // Encoded minimization.
++  MinimizeEncoded(&trans2word_fst);
++
++  //*hclg_noloop_fst = *out_fst;
++
++  std::vector<int32> disambig;
++  AddSelfLoops(trans_model_,
++               disambig,
++               opts_.self_loop_scale,
++               opts_.reorder,
++               &trans2word_fst);
++
++  delete H;
++  delete cfst;
++  return true;
++}
++
++
++bool TrainingGraphCompilerVis::CompileGraphsFromText(
++    const std::vector<std::vector<int32> > &transcripts,
++    std::vector<fst::VectorFst<fst::StdArc>*> *out_fsts) {
++  using namespace fst;
++  std::vector<const VectorFst<StdArc>* > word_fsts(transcripts.size());
++  for (size_t i = 0; i < transcripts.size(); i++) {
++    VectorFst<StdArc>* word_fst = new VectorFst<StdArc>();
++    MakeLinearAcceptor(transcripts[i], word_fst);
++    word_fsts[i] = word_fst;
++  }    
++  bool ans = CompileGraphs(word_fsts, out_fsts);
++  for (size_t i = 0; i < transcripts.size(); i++)
++    delete word_fsts[i];
++  return ans;
++}
++
++bool TrainingGraphCompilerVis::CompileGraphs(
++    const std::vector<const fst::VectorFst<fst::StdArc>* > &word_fsts,
++    std::vector<fst::VectorFst<fst::StdArc>* > *out_fsts) {
++
++  using namespace fst;
++  assert(lex_fst_ !=NULL);
++  assert(out_fsts != NULL && out_fsts->empty());
++  out_fsts->resize(word_fsts.size(), NULL);
++  if (word_fsts.empty()) return true;
++
++  ContextFst<StdArc> *cfst = NULL;
++  {  // make cfst [ it's expanded on the fly ]
++    const std::vector<int32> &phone_syms = trans_model_.GetPhones();  // needed to create context fst.
++    int32 subseq_symbol = phone_syms.back() + 1;
++    if (!disambig_syms_.empty() && subseq_symbol <= disambig_syms_.back())
++      subseq_symbol = 1 + disambig_syms_.back();
++
++    cfst = new ContextFst<StdArc>(subseq_symbol,
++                                  phone_syms,
++                                  disambig_syms_,
++                                  ctx_dep_.ContextWidth(),
++                                  ctx_dep_.CentralPosition());
++  }
++
++  for (size_t i = 0; i < word_fsts.size(); i++) {
++    VectorFst<StdArc> phone2word_fst;
++    // TableCompose more efficient than compose.
++    TableCompose(*lex_fst_, *(word_fsts[i]), &phone2word_fst, &lex_cache_);
++
++    assert(phone2word_fst.Start() != kNoStateId);
++
++    VectorFst<StdArc> ctx2word_fst;
++    ComposeContextFst(*cfst, phone2word_fst, &ctx2word_fst);
++    // ComposeContextFst is like Compose but faster for this particular Fst type.
++    // [and doesn't expand too many arcs in the ContextFst.]
++
++    assert(ctx2word_fst.Start() != kNoStateId);
++
++    (*out_fsts)[i] = ctx2word_fst.Copy();  // For now this contains the FST with symbols
++    // representing phones-in-context.
++  }
++
++  HTransducerConfig h_cfg;
++  h_cfg.transition_scale = opts_.transition_scale;
++
++  std::vector<int32> disambig_syms_h;
++  VectorFst<StdArc> *H = GetHTransducer(cfst->ILabelInfo(),
++                                        ctx_dep_,
++                                        trans_model_,
++                                        h_cfg,
++                                        &disambig_syms_h);
++
++  for (size_t i = 0; i < out_fsts->size(); i++) {
++    VectorFst<StdArc> &ctx2word_fst = *((*out_fsts)[i]);
++    VectorFst<StdArc> trans2word_fst;
++    TableCompose(*H, ctx2word_fst, &trans2word_fst);
++
++    DeterminizeStarInLog(&trans2word_fst);
++
++    if (!disambig_syms_h.empty()) {
++      RemoveSomeInputSymbols(disambig_syms_h, &trans2word_fst);
++      if (opts_.rm_eps)
++        RemoveEpsLocal(&trans2word_fst);
++    }
++    
++    // Encoded minimization.
++    MinimizeEncoded(&trans2word_fst);
++
++    std::vector<int32> disambig;
++    AddSelfLoops(trans_model_,
++                 disambig,
++                 opts_.self_loop_scale,
++                 opts_.reorder,
++                 &trans2word_fst);
++
++    assert(trans2word_fst.Start() != kNoStateId);
++
++    *((*out_fsts)[i]) = trans2word_fst;
++  }
++
++  delete H;
++  delete cfst;
++  return true;
++}
++
++
++}  // end namespace kaldi
+diff --git a/src/decoder/training-graph-compiler-vis.h b/src/decoder/training-graph-compiler-vis.h
+new file mode 100644
+index 0000000..91f52c6
+--- /dev/null
++++ b/src/decoder/training-graph-compiler-vis.h
+@@ -0,0 +1,114 @@
++// decoder/training-graph-compiler.h
++
++// Copyright 2009-2011 Microsoft Corporation
++
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++
++//  http://www.apache.org/licenses/LICENSE-2.0
++
++// THIS CODE IS PROVIDED *AS IS* BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++// KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION ANY IMPLIED
++// WARRANTIES OR CONDITIONS OF TITLE, FITNESS FOR A PARTICULAR PURPOSE,
++// MERCHANTABLITY OR NON-INFRINGEMENT.
++// See the Apache 2 License for the specific language governing permissions and
++// limitations under the License.
++#ifndef KALDI_DECODER_TRAINING_GRAPH_COMPILER_H_
++#define KALDI_DECODER_TRAINING_GRAPH_COMPILER_H_
++
++#include "base/kaldi-common.h"
++#include "hmm/transition-model.h"
++#include "fst/fstlib.h"
++#include "fstext/fstext-lib.h"
++
++
++namespace kaldi {
++
++struct TrainingGraphCompilerVisOptions {
++
++  BaseFloat transition_scale;
++  BaseFloat self_loop_scale;
++  bool rm_eps;
++  bool reorder;  // (Dan-style graphs)
++
++  explicit TrainingGraphCompilerVisOptions(BaseFloat transition_scale = 1.0,
++                                        BaseFloat self_loop_scale = 1.0,
++                                        bool b = true) :
++      transition_scale(transition_scale),
++      self_loop_scale(self_loop_scale),
++      rm_eps(false),
++      reorder(b) { }
++
++  void Register(ParseOptions *po) {
++    po->Register("transition-scale", &transition_scale, "Scale of transition "
++                 "probabilities (excluding self-loops)");
++    po->Register("self-loop-scale", &self_loop_scale, "Scale of self-loop vs. "
++                 "non-self-loop probability mass ");
++    po->Register("reorder", &reorder, "Reorder transition ids for greater decoding efficiency.");
++    po->Register("rm-eps", &rm_eps,  "Remove [most] epsilons before minimization (only applicable "
++                 "if disambig symbols present)");
++  }
++};
++
++
++class TrainingGraphCompilerVis {
++ public:
++  TrainingGraphCompilerVis(const TransitionModel &trans_model,  // Maintains reference to this object.
++                        const ContextDependency &ctx_dep,  // And this.
++                        fst::VectorFst<fst::StdArc> *lex_fst,  // Takes ownership of this object.
++                        // It should not contain disambiguation symbols or subsequential symbol,
++                        // but it should contain optional silence.
++                        const std::vector<int32> &disambig_syms, // disambig symbols in phone symbol table.
++                        const TrainingGraphCompilerVisOptions &opts);
++
++
++  /// CompileGraph compiles a single training graph its input is a
++  // weighted acceptor (G) at the word level, its output is HCLG.
++  // Note: G could actually be an acceptor, it would also work.
++  // This function is not const for technical reasons involving the cache.
++  // if not for "table_compose" we could make it const.
++  bool CompileGraph(const fst::VectorFst<fst::StdArc> &word_grammar,
++                    fst::VectorFst<fst::StdArc> *out_fst,
++                    fst::VectorFst<fst::StdArc> *lg_fst,
++                    fst::VectorFst<fst::StdArc> *clg_fst,
++                    fst::VectorFst<fst::StdArc> *hclg_noloop_fst);
++  
++  // CompileGraphs allows you to compile a number of graphs at the same
++  // time.  This consumes more memory but is faster.
++  bool CompileGraphs(
++      const std::vector<const fst::VectorFst<fst::StdArc> *> &word_fsts,
++      std::vector<fst::VectorFst<fst::StdArc> *> *out_fsts);
++
++  // This version creates an FST from the text and calls CompileGraph.
++  bool CompileGraphFromText(const std::vector<int32> &transcript,
++                            fst::VectorFst<fst::StdArc> *out_fst,
++                            fst::VectorFst<fst::StdArc> *lg_fst,
++                            fst::VectorFst<fst::StdArc> *clg_fst,
++                            fst::VectorFst<fst::StdArc> *hclg_noloop_fst);
++
++  // This function creates FSTs from the text and calls CompileGraphs.
++  bool CompileGraphsFromText(
++      const std::vector<std::vector<int32> >  &word_grammar,
++      std::vector<fst::VectorFst<fst::StdArc> *> *out_fsts);
++  
++  
++  ~TrainingGraphCompilerVis() { delete lex_fst_; }
++ private:
++  const TransitionModel &trans_model_;
++  const ContextDependency &ctx_dep_;
++  fst::VectorFst<fst::StdArc> *lex_fst_; // lexicon FST (an input; we take
++  // ownership as we need to modify it).
++  std::vector<int32> disambig_syms_; // disambig symbols (if any) in the phone
++  // symbol table.
++  fst::TableComposeCache<fst::Fst<fst::StdArc> > lex_cache_;  // stores matcher..
++  // this is one of Dan's extensions.
++
++  TrainingGraphCompilerVisOptions opts_;
++};
++
++
++
++}  // end namespace kaldi.
++
++#endif
+diff --git a/src/featbin/Makefile b/src/featbin/Makefile
+index 372e534..bbfaae4 100644
+--- a/src/featbin/Makefile
++++ b/src/featbin/Makefile
+@@ -3,7 +3,7 @@ all:
+ EXTRA_CXXFLAGS = -Wno-sign-compare
+ include ../kaldi.mk
+ 
+-BINFILES = compute-mfcc-feats compute-plp-feats compute-cmvn-stats add-deltas \
++BINFILES = pack-sphinx-feats compute-mfcc-feats compute-plp-feats compute-cmvn-stats add-deltas \
+ 	remove-mean apply-cmvn transform-feats copy-feats compose-transforms \
+     splice-feats extract-segments subset-feats feat-to-len feat-to-dim \
+     fmpe-apply-transform fmpe-acc-stats fmpe-init fmpe-update
+diff --git a/src/featbin/pack-sphinx-feats.cc b/src/featbin/pack-sphinx-feats.cc
+new file mode 100644
+index 0000000..a0a591a
+--- /dev/null
++++ b/src/featbin/pack-sphinx-feats.cc
+@@ -0,0 +1,163 @@
++// Copyright 2012 Vassil Panayotov <vd.panayotov@gmail.com>
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//  http://www.apache.org/licenses/LICENSE-2.0
++//
++// THIS CODE IS PROVIDED *AS IS* BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++// KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION ANY IMPLIED
++// WARRANTIES OR CONDITIONS OF TITLE, FITNESS FOR A PARTICULAR PURPOSE,
++// MERCHANTABLITY OR NON-INFRINGEMENT.
++// See the Apache 2 License for the specific language governing permissions and
++// limitations under the License.
++
++#include <iostream>
++#include <exception>
++
++#include <util/common-utils.h>
++#include <matrix/matrix-lib.h>
++
++namespace kaldi {
++
++/// As far as I understand from sphinx_fe's code it writes big endian float MFCCs
++/// SphinxFeatHolder assumes that the floating point byte-order is the same
++/// as the integer byte-order.
++/// The template parameters are more about documenting assumptions, than anything else.
++template <typename FeatType=float, int fvec_len=13, bool be_feats=true, bool be_machine=false>
++class SphinxFeatHolder {
++public:
++    typedef Matrix<FeatType> T;
++
++    SphinxFeatHolder(): feats_(0) {}
++
++    /// Read a sphinx feature file
++    bool Read(std::istream &is) {
++        int nmfcc;
++        try {
++            if (feats_) {
++                delete feats_;
++                feats_ = 0;
++            }
++            is.read((char*) &nmfcc, sizeof(nmfcc));
++            if (be_feats != be_machine)
++                nmfcc = swap(nmfcc);
++            KALDI_VLOG(2) << "#feats: " << nmfcc;
++
++            int nfvec = nmfcc / fvec_len;
++            KALDI_ASSERT((nmfcc % fvec_len) == 0);
++            feats_ = new T(nfvec, fvec_len);
++            for (int i = 0; i < nfvec; i++) {
++                if (!is.read((char*) feats_->RowData(i), fvec_len * sizeof(FeatType))) {
++                    KALDI_ERR << "Unexpected EOF" << std::endl;
++                    return false;
++                }
++
++                if (be_feats != be_machine) {
++                    FeatType *f = feats_->RowData(i);
++                    for (int j=0; j < fvec_len; j++) {
++                        f[j] = swap(f[j]);
++                    }
++                }
++            }
++        }
++        catch(std::exception e) {
++            KALDI_ERR << e.what() << std::endl;
++            return false;
++        }
++
++        return true;
++    }
++
++    /// Write a Sphinx-format feature file
++    static bool Write(std::ostream& os, bool binary, const T& m) {
++        if (!binary) {
++            KALDI_ERR << "Can't write Sphinx features in text" << std::endl;
++            return false;
++        }
++
++        try {
++            int rows = m.NumRows();
++            int head = (be_feats == be_machine)? rows: swap(rows);
++            os.write((char*) head, sizeof(head));
++            for (int i = 0; i < rows; i++) {
++                os.write((char*) m.RowData(i), fvec_len * sizeof(FeatType));
++            }
++        }
++        catch(std::exception e) {
++            KALDI_ERR << e.what() << std::endl;
++            return false;
++        }
++
++        return true;
++    }
++
++    /// Get the features
++    T& Value() { return *feats_; }
++
++    /// The Sphinx's feature files are binary
++    static bool IsReadInBinary() { return true; }
++
++    /// Free the buffer if requested
++    void Clear() {
++        if (feats_)
++            delete feats_;
++        feats_ = 0;
++    }
++
++    ~SphinxFeatHolder() {
++        if (feats_)
++            delete feats_;
++    }
++
++private:
++    /// A naive byte-swapping routine
++    template<class N>
++    inline N swap(N val) {
++        char tmp[4];
++        char *p = (char*) &val;
++        tmp[0] = p[3];
++        tmp[1] = p[2];
++        tmp[2] = p[1];
++        tmp[3] = p[0];
++
++        return *((N*) tmp);
++    }
++
++    /// The feature matrix
++    T *feats_;
++};
++
++} // namespace kaldi
++
++int main(int argc, char **argv) {
++    using namespace kaldi;
++
++    ParseOptions po("Usage: pack-sphinx-feats [options] <rxspecifier> <wxspecifier>\n");
++    po.Read(argc, argv);
++    if (po.NumArgs() != 2) {
++        po.PrintUsage();
++        exit(1);
++    }
++
++    std::string rspec = po.GetArg(1);
++    std::string wspec = po.GetArg(2);
++    SequentialTableReader<SphinxFeatHolder<> > reader(rspec);
++    BaseFloatMatrixWriter writer;
++    if (!writer.Open(wspec)) {
++        KALDI_ERR << "Error while trying to open \"" << wspec << '\"';
++        return 1;
++    }
++
++    int count = 0;
++    for (; !reader.Done(); reader.Next(), count++) {
++        std::string key = reader.Key();
++        const Matrix<float> &feats = reader.Value();
++        writer.Write(key, feats);
++        KALDI_VLOG(2) << "Packaged: " << key;
++    }
++    KALDI_LOG << "Done packaging " << count << " feature files";
++
++    return 0;
++}
+diff --git a/src/fstbin/Makefile b/src/fstbin/Makefile
+index b88e67b..1db1b71 100644
+--- a/src/fstbin/Makefile
++++ b/src/fstbin/Makefile
+@@ -14,7 +14,7 @@ TESTFILES =
+ 
+ OBJFILES = 
+ 
+-BINFILES = fstpredeterminize fstdeterminizestar  \
++BINFILES = fstmaketidsyms fstpredeterminize fstdeterminizestar  \
+            fstrmsymbols fstisstochastic fstminimizeencoded fstoptimize fstmakecontextfst \
+            fstmakecontextsyms fstaddsubsequentialloop fstaddselfloops  \
+            fstrmepslocal fstcomposecontext fsttablecompose fstrand fstfactor \
+@@ -27,7 +27,7 @@ LIBFILE =
+ all: $(BINFILES)
+ 
+ 
+-$(BINFILES): ../base/kaldi-base.a ../util/kaldi-util.a
++$(BINFILES): ../hmm/kaldi-hmm.a ../tree/kaldi-tree.a ../matrix/kaldi-matrix.a ../base/kaldi-base.a ../util/kaldi-util.a
+ 
+ %.a:
+ 	$(MAKE) -C ${@D} ${@F}
+diff --git a/src/fstbin/fstmaketidsyms.cc b/src/fstbin/fstmaketidsyms.cc
+new file mode 100644
+index 0000000..c1f4303
+--- /dev/null
++++ b/src/fstbin/fstmaketidsyms.cc
+@@ -0,0 +1,99 @@
++// Copyright 2012  Vassil Panayotov <vd.panayotov@gmail.com>
++
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//  http://www.apache.org/licenses/LICENSE-2.0
++//
++// THIS CODE IS PROVIDED *AS IS* BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++// KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION ANY IMPLIED
++// WARRANTIES OR CONDITIONS OF TITLE, FITNESS FOR A PARTICULAR PURPOSE,
++// MERCHANTABLITY OR NON-INFRINGEMENT.
++// See the Apache 2 License for the specific language governing permissions and
++// limitations under the License.
++
++#include "base/kaldi-common.h"
++#include "util/common-utils.h"
++#include "hmm/transition-model.h"
++#include "fst/fstlib.h"
++#include "fstext/fstext-utils.h"
++#include "fstext/context-fst.h"
++
++int main(int argc, char **argv)
++{
++    using namespace kaldi;
++    try {
++        std::string sep = "_";
++        bool verbose = false;
++        bool show_tids = false;
++        const char *usage = "Outputs symbolic names for all transition ids"
++                "(can be used in graph visualizations)\n"
++                "The format of the output is phone_hmm-state_pdfid_transidx tid"
++                "(assuming the separator is \'_\')\n\n"
++                "Usage: fstmaketidsyms [options] phones model [out_tid_symtab]\n";
++        ParseOptions po(usage);
++        po.Register("separator", &sep, "The symbol to be used as separator b/w tid's constituents");
++        po.Register("verbose-output", &verbose, "Verbose output to stderr?");
++        po.Register("show-tids", &show_tids, "Also show the transitions IDs");
++        po.Read(argc, argv);
++        if (po.NumArgs() < 2 || po.NumArgs() > 3) {
++            po.PrintUsage();
++            exit(1);
++        }
++
++        std::string phnfile = po.GetArg(1);
++        std::string mdlfile = po.GetArg(2);
++        std::string tidsymfile = po.GetOptArg(3);
++
++        TransitionModel trans_model;
++        {
++            bool binary;
++            Input ki(mdlfile, &binary);
++            trans_model.Read(ki.Stream(), binary);
++        }
++
++        fst::SymbolTable *phones_symtab = NULL;
++        {   // read phone symbol table.
++            std::ifstream is(phnfile.c_str());
++            phones_symtab = ::fst::SymbolTable::ReadText(is, phnfile);
++            if (!phones_symtab) KALDI_ERR << "Could not read phones symbol-table file "<< phnfile;
++        }
++
++        if (verbose)
++            KALDI_LOG << "#phones: " << trans_model.GetPhones().size();
++        fst::SymbolTable tidsymtab("tid-symbol-table");
++        kaldi::int64 e = tidsymtab.AddSymbol(
++                    phones_symtab->Find((kaldi::int64) 0)); // <eps>
++        KALDI_ASSERT(e == 0);
++        for (int i = 0; i < trans_model.NumTransitionIds(); i++) {
++            std::ostringstream oss;
++            kaldi::int32 tid = i+1; // trans-ids are 1-based
++            int phnid = trans_model.TransitionIdToPhone(tid);
++            oss << phones_symtab->Find(phnid);
++            int hmmstate = trans_model.TransitionIdToHmmState(tid);
++            int pdf = trans_model.TransitionIdToPdf(tid);
++            int trans = trans_model.TransitionIdToTransitionIndex(tid);
++            oss << sep << hmmstate << sep << pdf << sep << trans;
++            if (show_tids)
++                oss << '[' << tid << ']';
++            tidsymtab.AddSymbol(oss.str(), tid);
++            if (verbose)
++                KALDI_LOG << "TransID:" << tid << "; PhoneID:" << phnid <<
++                             "; Phone:" << phones_symtab->Find(phnid) <<
++                             "; HMM state:" << hmmstate <<
++                             "; PDF:" << pdf <<
++                             "; trans:" << trans;
++        }
++        if (tidsymfile == "")
++            tidsymtab.WriteText(std::cout);
++        else
++            tidsymtab.WriteText(tidsymfile);
++
++        return 0;
++    }
++    catch (const std::exception& e) {
++        std::cerr << e.what();
++        return -1;
++    }
++}
+diff --git a/src/tree/event-map.h b/src/tree/event-map.h
+index bc1c489..ae02a2d 100644
+--- a/src/tree/event-map.h
++++ b/src/tree/event-map.h
+@@ -76,6 +76,22 @@ struct EventMapVectorEqual {  // Equality object for EventType pointers-- test e
+   size_t operator () (const EventType* p1, const EventType *p2) { return (*p1 == *p2); }
+ };
+ 
++class EventMap;
++
++/// Abstract visitor interface to be implemented by the classes, that need to walk
++/// the event map tree
++class EventMapVisitor {
++public:
++    virtual void VisitConst(const EventAnswerType &answer) = 0;
++
++    virtual void VisitSplit(EventKeyType &key,
++                    ConstIntegerSet<EventValueType> &yes_set,
++                    EventMap *yes_map,
++                    EventMap *no_map) = 0;
++
++    virtual void VisitTable(const EventKeyType &key,
++                            std::vector<EventMap*> &table) = 0;
++};
+ 
+ /// A class that is capable of representing a generic mapping from
+ /// EventType (which is a vector of (key, value) pairs) to
+@@ -130,11 +146,15 @@ class EventMap {
+ 
+   virtual ~EventMap() {}
+ 
++  virtual void Accept(EventMapVisitor &visitor) = 0;
++
+   /// a Write function that takes care of NULL pointers.
+   static void Write(std::ostream &os, bool binary, EventMap *emap);
+   /// a Read function that reads an arbitrary EventMap; also
+   /// works for NULL pointers.
+   static EventMap *Read(std::istream &is, bool binary);
++
++
+ };
+ 
+ 
+@@ -162,6 +182,11 @@ class ConstantEventMap: public EventMap {
+   explicit ConstantEventMap(EventAnswerType answer): answer_(answer) { }
+   
+   virtual void Write(std::ostream &os, bool binary);
++
++  virtual void Accept(EventMapVisitor &visitor) {
++    visitor.VisitConst(answer_);
++  }
++
+   static ConstantEventMap *Read(std::istream &is, bool binary);
+  private:
+   EventAnswerType answer_;
+@@ -198,6 +223,10 @@ class TableEventMap: public EventMap {
+     }
+   }
+ 
++  virtual void Accept(EventMapVisitor &visitor) {
++    visitor.VisitTable(key_, table_);
++  }
++
+   /// Takes ownership of pointers.
+   explicit TableEventMap(EventKeyType key, const std::vector<EventMap*> &table): key_(key), table_(table) {}
+   /// Takes ownership of pointers.
+@@ -268,6 +297,10 @@ class SplitEventMap: public EventMap {  // A decision tree [non-leaf] node.
+ 
+   virtual ~SplitEventMap() { Destroy(); }
+ 
++  virtual void Accept(EventMapVisitor &visitor) {
++    visitor.VisitSplit(key_, yes_set_, yes_, no_);
++  }
++
+   /// This constructor takes ownership of the "yes" and "no" arguments.
+   SplitEventMap(EventKeyType key, const std::vector<EventValueType> &yes_set,
+                 EventMap *yes, EventMap *no): key_(key), yes_set_(yes_set), yes_(yes), no_(no) {
+@@ -275,7 +308,6 @@ class SplitEventMap: public EventMap {  // A decision tree [non-leaf] node.
+     assert(yes_ != NULL && no_ != NULL);
+   }
+ 
+-
+  private:
+   /// This constructor used in the Copy() function.
+   SplitEventMap(EventKeyType key, const ConstIntegerSet<EventValueType> &yes_set,
